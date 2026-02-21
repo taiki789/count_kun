@@ -12,83 +12,119 @@ import {
 
 export default function Home() {
   const router = useRouter();
-  // loading を追加して、データ取得前のチラつきを防止
   const { counts, history, addHistory, resetData, loading } = useContext(PrizeContext);
+
+  const colors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        router.push("/");
-      }
+      if (!user) router.push("/");
     });
     return () => unsub();
   }, [router]);
 
-  // 引くボタンを押した時の処理
+  // 時間フォーマット関数 (Unixタイムスタンプを HH:mm 形式へ)
+  const formatTime = (tick: any) => {
+    if (!tick) return "";
+    const date = new Date(tick);
+    return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
+
   const handleDraw = async (index: number) => {
     if (counts[index] <= 0) return;
-
-    // 現在のカウントをコピーして、該当する等級を1減らす
     const newCounts = [...counts];
     newCounts[index] -= 1;
 
-    // Firestoreを更新しにいく（これで全員の画面が同期される）
     try {
+      // 履歴には Date.now() 等でタイムスタンプが含まれる前提
       await addHistory(newCounts);
     } catch (error) {
-      console.error("更新に失敗しました:", error);
-      alert("通信エラーが発生しました。");
+      console.error("更新失敗:", error);
     }
   };
 
-  const colors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
-
-  // 読み込み中は何も表示しない、またはローディング画面を出す
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="animate-pulse font-bold text-gray-400">LOADING DATA...</p>
+      <div className="flex h-screen items-center justify-center bg-white">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-black border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-xs font-black tracking-widest text-gray-400">LOADING...</p>
+        </div>
       </div>
     );
   }
 
+  // グラフ描画用コンポーネント
+  const renderLineContent = () => [1, 2, 3, 4, 5].map((rank, i) => (
+    <Line
+      key={rank}
+      type="monotone" // 点と点を滑らかにつなぐ
+      dataKey={`p${rank}`}
+      stroke={colors[i]}
+      strokeWidth={3}
+      dot={{ r: 4, fill: colors[i], strokeWidth: 2, stroke: "#fff" }} // 最初は点で表示
+      activeDot={{ r: 6, strokeWidth: 0 }}
+      animationDuration={1000}
+      connectNulls={true}
+    />
+  ));
+
   return (
-    <div className="min-h-screen bg-white pb-20 md:pb-0">
+    <div className="min-h-screen bg-[#F8F9FA] pb-24 md:pb-0 font-sans">
       
-      {/* --- PC版 UI --- */}
-      <div className="hidden md:flex flex-col h-screen bg-gray-100">
-        <header className="bg-white border-b px-8 py-4 flex justify-between items-center shadow-sm">
-           <div className="flex items-center gap-2">
-             <img src="/favicon.ico" alt="favicon" className="w-6 h-6" />
-             <h1 className="text-2xl font-black text-gray-800 tracking-tighter">Count kun</h1>
-           </div>
-           {/* resetData も Firestore 対応版を呼び出す */}
-          <button onClick={() => confirm("全データをリセットしますか？この操作は全員に反映されます。") && resetData()} className="text-xs font-bold text-gray-400 hover:text-red-500 border border-gray-200 px-4 py-2 rounded-lg transition-all">RESET DATA</button>
+      {/* --- PC版 --- */}
+      <div className="hidden md:flex flex-col h-screen">
+        <header className="bg-white border-b px-10 py-5 flex justify-between items-center shadow-sm">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push("/")}>
+            <img src="/favicon.ico" alt="icon" className="w-10 h-10" />
+            <h1 className="text-2xl font-black text-gray-900 tracking-tighter">Count kun</h1>
+          </div>
+          <button 
+            onClick={() => confirm("リセットしますか？") && resetData()} 
+            className="text-[10px] font-black text-gray-400 hover:text-red-500 border border-gray-200 px-5 py-2 rounded-full transition-all tracking-widest"
+          >
+            RESET DATA
+          </button>
         </header>
 
-        <main className="flex-1 overflow-hidden p-8 grid grid-cols-12 gap-8">
-          <div className="col-span-8 bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
+        <main className="flex-1 overflow-hidden p-10 grid grid-cols-12 gap-10">
+          <div className="col-span-8 bg-white p-8 rounded-[32px] shadow-xl shadow-gray-200/50 border border-gray-100">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={history}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <XAxis dataKey="time" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                {[1, 2, 3, 4, 5].map((rank, i) => (
-                  <Line key={rank} type="stepAfter" dataKey={`p${rank}`} stroke={colors[i]} strokeWidth={4} dot={false} name={`${rank}等`} />
-                ))}
+              <LineChart data={history} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
+                <XAxis 
+                  dataKey="timestamp" // UnixTimeを使用
+                  type="number"       // これにより時間幅が可変になる
+                  domain={['dataMin', 'dataMax']} 
+                  tickFormatter={formatTime}
+                  fontSize={12}
+                  tickMargin={15}
+                  axisLine={false}
+                  tickLine={false}
+                  stroke="#ADB5BD"
+                />
+                <YAxis fontSize={12} axisLine={false} tickLine={false} stroke="#ADB5BD" />
+                <Tooltip 
+                  labelFormatter={(val) => `時刻: ${formatTime(val)}`}
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }} 
+                />
+                <Legend iconType="circle" verticalAlign="top" align="right" height={50} />
+                {renderLineContent()}
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <div className="col-span-4 space-y-3 overflow-y-auto">
+
+          <div className="col-span-4 space-y-4 overflow-y-auto pr-2">
             {counts.map((count: number, i: number) => (
-              <div key={i} className="bg-white p-4 rounded-xl border border-gray-200 flex items-center justify-between shadow-sm">
-                <p className="font-bold text-gray-500">{i + 1}等: {count}</p>
+              <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow">
+                <div>
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">{i + 1}等</p>
+                  <p className="text-3xl font-black text-gray-900">{count}</p>
+                </div>
                 <button 
-                  onClick={() => handleDraw(i)} 
-                  disabled={count === 0} 
-                  className="bg-black text-white px-4 py-1 rounded-lg text-sm disabled:opacity-20 active:scale-95 transition-transform"
+                  onClick={() => handleDraw(i)}
+                  disabled={count === 0}
+                  className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold disabled:opacity-10 active:scale-95 transition-all"
                 >
                   DRAW
                 </button>
@@ -98,54 +134,61 @@ export default function Home() {
         </main>
       </div>
 
-      {/* --- 携帯版 UI --- */}
-      <div className="md:hidden flex flex-col h-screen overflow-hidden">
-        <div className="flex-1 p-4">
-          <div className="text-center mb-2 flex flex-col items-center">
-            <img src="/favicon.ico" alt="favicon" className="w-5 h-5 mb-1" />
-            <h1 className="text-sm font-black text-gray-400 tracking-widest uppercase">Count kun</h1>
+      {/* --- 携帯版 --- */}
+      <div className="md:hidden flex flex-col h-screen overflow-hidden bg-white">
+        <div className="flex-1 p-5 flex flex-col">
+          <div className="flex justify-between items-center mb-6">
+            <img src="/favicon.ico" alt="icon" className="w-10 h-10" />
+            <h1 className="text-[12px] font-black text-gray-900 tracking-[0.3em] uppercase">Count kun</h1>
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
           </div>
-          <div className="h-full max-h-[300px] w-full bg-gray-50 rounded-2xl p-2 border border-gray-100 shadow-inner">
+          
+          <div className="flex-1 min-h-[300px] w-full bg-gray-50 rounded-[40px] p-5 shadow-inner border border-gray-100">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e5e5" />
-                <XAxis dataKey="time" fontSize={9} />
-                <YAxis fontSize={9} axisLine={false} />
-                <Tooltip contentStyle={{ fontSize: '10px' }} />
-                {[1, 2, 3, 4, 5].map((rank, i) => (
-                  <Line key={rank} type="stepAfter" dataKey={`p${rank}`} stroke={colors[i]} strokeWidth={2} dot={false} />
-                ))}
+              <LineChart data={history} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E9ECEF" />
+                <XAxis 
+                  dataKey="timestamp" 
+                  type="number" 
+                  domain={['dataMin', 'dataMax']} 
+                  tickFormatter={formatTime}
+                  fontSize={10}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis fontSize={10} axisLine={false} tickLine={false} />
+                {renderLineContent()}
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-white border-t p-4 pb-8 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
-          <div className="flex justify-between items-end gap-2 overflow-x-auto pb-2">
+        {/* 携帯版 下部ナビゲーション兼操作パネル */}
+        <div className="bg-white border-t border-gray-100 p-6 pb-10 rounded-t-[48px] shadow-[0_-25px_50px_-12px_rgba(0,0,0,0.08)]">
+          <div className="grid grid-cols-5 gap-3 mb-8">
             {counts.map((count: number, i: number) => (
               <button
                 key={i}
                 onClick={() => handleDraw(i)}
                 disabled={count === 0}
                 className={`
-                  flex-1 min-w-[60px] aspect-[3/4] rounded-xl flex flex-col items-center justify-center transition-all border-b-4
-                  active:translate-y-1 active:border-b-0
-                  ${count === 0 
-                    ? "bg-gray-100 text-gray-300 border-gray-300 shadow-none pointer-events-none" 
-                    : "bg-white text-gray-900 border-gray-200 shadow-md"}
+                  aspect-[4/5] rounded-2xl flex flex-col items-center justify-center transition-all
+                  ${count === 0 ? "bg-gray-50 text-gray-200" : "bg-white shadow-lg border border-gray-100 active:scale-90"}
                 `}
               >
-                <span className="text-[10px] font-bold opacity-50">{i + 1}等</span>
-                <span className={`text-xl font-black ${count <= 3 && count > 0 ? "text-orange-500" : ""}`}>
-                  {count}
-                </span>
-                <div className="mt-1 w-4 h-[2px] rounded-full" style={{ backgroundColor: colors[i] }}></div>
+                <span className="text-[10px] font-black opacity-30 mb-1">{i+1}</span>
+                <span className={`text-xl font-black ${count <= 3 && count > 0 ? "text-orange-500" : "text-gray-900"}`}>{count}</span>
+                <div className="w-4 h-[3px] rounded-full mt-2" style={{ backgroundColor: colors[i] }}></div>
               </button>
             ))}
           </div>
-          <p className="text-[9px] text-center text-gray-300 mt-3 uppercase tracking-widest">
-            Tap to draw prize
-          </p>
+          
+          <button 
+            onClick={() => router.push("/")}
+            className="w-full py-5 bg-gray-900 text-white font-black rounded-2xl shadow-xl shadow-gray-200 active:scale-[0.98] transition-all tracking-[0.2em] text-sm uppercase"
+          >
+            Exit to Home
+          </button>
         </div>
       </div>
     </div>

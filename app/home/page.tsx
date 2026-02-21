@@ -27,7 +27,10 @@ export default function Home() {
       <div className="hidden md:flex flex-col h-screen bg-gray-100">
         {/* 前回のPC版コードをそのまま維持 */}
         <header className="bg-white border-b px-8 py-4 flex justify-between items-center shadow-sm">
-          <h1 className="text-2xl font-black text-gray-800 tracking-tighter">Count kun</h1>
+           <img src="/favicon.ico" alt="favicon" className="w-6 h-6" />
+           <div className="flex flex-col">
+              <h1 className="text-2xl font-black text-gray-800 tracking-tighter">Count kun</h1>
+           </div>
           <button onClick={() => confirm("リセットしますか？") && resetData()} className="text-xs font-bold text-gray-400 hover:text-red-500 border border-gray-200 px-4 py-2 rounded-lg transition-all">RESET DATA</button>
         </header>
         <main className="flex-1 overflow-hidden p-8 grid grid-cols-12 gap-8">
@@ -63,6 +66,7 @@ export default function Home() {
         {/* グラフエリア（スマホ版：上部に配置して常に状況を確認） */}
         <div className="flex-1 p-4">
           <div className="text-center mb-2">
+            <img src="/favicon.ico" alt="favicon" className="w-6 h-6" />
             <h1 className="text-sm font-black text-gray-400 tracking-widest">Count kun</h1>
           </div>
           <div className="h-full max-h-[300px] w-full bg-gray-50 rounded-2xl p-2 border border-gray-100">

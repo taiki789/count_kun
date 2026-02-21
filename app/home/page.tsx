@@ -12,28 +12,45 @@ import {
 
 export default function Home() {
   const router = useRouter();
-  const { counts, setCounts, history, addHistory, resetData } = useContext(PrizeContext);
+  // loading を追加して、データ取得前のチラつきを防止
+  const { counts, history, addHistory, resetData, loading } = useContext(PrizeContext);
 
-  // ▼ 必ずコンポーネント関数（Home）の中で呼び出す
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) {
-        // ユーザーがログインしていなければログインページへリダイレクト
         router.push("/");
       }
     });
     return () => unsub();
   }, [router]);
 
-  const handleDraw = (index: number) => {
+  // 引くボタンを押した時の処理
+  const handleDraw = async (index: number) => {
     if (counts[index] <= 0) return;
+
+    // 現在のカウントをコピーして、該当する等級を1減らす
     const newCounts = [...counts];
     newCounts[index] -= 1;
-    setCounts(newCounts);
-    addHistory(newCounts);
+
+    // Firestoreを更新しにいく（これで全員の画面が同期される）
+    try {
+      await addHistory(newCounts);
+    } catch (error) {
+      console.error("更新に失敗しました:", error);
+      alert("通信エラーが発生しました。");
+    }
   };
 
   const colors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
+
+  // 読み込み中は何も表示しない、またはローディング画面を出す
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <p className="animate-pulse font-bold text-gray-400">LOADING DATA...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white pb-20 md:pb-0">
@@ -45,7 +62,8 @@ export default function Home() {
              <img src="/favicon.ico" alt="favicon" className="w-6 h-6" />
              <h1 className="text-2xl font-black text-gray-800 tracking-tighter">Count kun</h1>
            </div>
-          <button onClick={() => confirm("リセットしますか？") && resetData()} className="text-xs font-bold text-gray-400 hover:text-red-500 border border-gray-200 px-4 py-2 rounded-lg transition-all">RESET DATA</button>
+           {/* resetData も Firestore 対応版を呼び出す */}
+          <button onClick={() => confirm("全データをリセットしますか？この操作は全員に反映されます。") && resetData()} className="text-xs font-bold text-gray-400 hover:text-red-500 border border-gray-200 px-4 py-2 rounded-lg transition-all">RESET DATA</button>
         </header>
 
         <main className="flex-1 overflow-hidden p-8 grid grid-cols-12 gap-8">
@@ -64,10 +82,16 @@ export default function Home() {
             </ResponsiveContainer>
           </div>
           <div className="col-span-4 space-y-3 overflow-y-auto">
-            {counts.map((count, i) => (
+            {counts.map((count: number, i: number) => (
               <div key={i} className="bg-white p-4 rounded-xl border border-gray-200 flex items-center justify-between shadow-sm">
                 <p className="font-bold text-gray-500">{i + 1}等: {count}</p>
-                <button onClick={() => handleDraw(i)} disabled={count === 0} className="bg-black text-white px-4 py-1 rounded-lg text-sm disabled:opacity-20 active:scale-95">DRAW</button>
+                <button 
+                  onClick={() => handleDraw(i)} 
+                  disabled={count === 0} 
+                  className="bg-black text-white px-4 py-1 rounded-lg text-sm disabled:opacity-20 active:scale-95 transition-transform"
+                >
+                  DRAW
+                </button>
               </div>
             ))}
           </div>
@@ -98,7 +122,7 @@ export default function Home() {
 
         <div className="bg-white border-t p-4 pb-8 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
           <div className="flex justify-between items-end gap-2 overflow-x-auto pb-2">
-            {counts.map((count, i) => (
+            {counts.map((count: number, i: number) => (
               <button
                 key={i}
                 onClick={() => handleDraw(i)}

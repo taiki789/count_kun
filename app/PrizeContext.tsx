@@ -1,11 +1,15 @@
 "use client";
 
-import React, { createContext, useState, ReactNode } from "react";
+import React, { createContext, useState, useEffect, ReactNode } from "react";
+// ▼ auth をインポート (パスはプロジェクトに合わせて調整してください)
+import { db, auth } from "../lib/firebase"; 
+import { doc, onSnapshot, updateDoc, setDoc } from "firebase/firestore";
+// ▼ onAuthStateChanged を firebase/auth からインポート
+import { onAuthStateChanged } from "firebase/auth";
 
-// グラフに渡すための履歴データの型
 export type HistoryData = {
-  time: string; // "14:30:05" のような時間
-  p1: number;   // 1等の数
+  time: string;
+  p1: number;
   p2: number;
   p3: number;
   p4: number;
@@ -14,11 +18,11 @@ export type HistoryData = {
 
 type PrizeContextType = {
   counts: number[];
-  setCounts: (counts: number[]) => void;
   history: HistoryData[];
-  addHistory: (newCounts: number[]) => void;
-  resetContext: (initialCounts: number[]) => void;
-  resetData: () => void;
+  addHistory: (newCounts: number[]) => Promise<void>;
+  resetContext: (initialCounts: number[]) => Promise<void>;
+  resetData: () => Promise<void>;
+  loading: boolean;
 };
 
 export const PrizeContext = createContext<PrizeContextType>({} as PrizeContextType);
@@ -26,50 +30,90 @@ export const PrizeContext = createContext<PrizeContextType>({} as PrizeContextTy
 export function PrizeProvider({ children }: { children: ReactNode }) {
   const [counts, setCounts] = useState<number[]>([0, 0, 0, 0, 0]);
   const [history, setHistory] = useState<HistoryData[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // 履歴を追加する関数（現在時刻を取得して記録）
-  const addHistory = (newCounts: number[]) => {
+  // 共有ドキュメントのID（全てのユーザーでこのIDを参照します）
+  const docId = "global-prize-counter";
+
+  // --- リアルタイム同期設定 ---
+
+  useEffect(() => {
+   const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // ユーザーがいる時だけ監視を開始
+        const unsubSnapshot = onSnapshot(doc(db, "prizes", docId), (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setCounts(data.counts);
+            setHistory(data.history || []);
+          } else {
+            setDoc(doc(db, "prizes", docId), { counts: [0,0,0,0,0], history: [] });
+          }
+          setLoading(false);
+        });
+        return () => unsubSnapshot();
+      } else {
+        setLoading(false);
+      }
+    });
+
+    return () => unsubAuth();
+  }, []);
+
+  // 現在時刻の文字列を生成するヘルパー
+  const getTimeString = () => {
     const now = new Date();
-    const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-    
-    setHistory((prev) => [
-      ...prev,
-      {
-        time: timeString,
-        p1: newCounts[0],
-        p2: newCounts[1],
-        p3: newCounts[2],
-        p4: newCounts[3],
-        p5: newCounts[4],
-      },
-    ]);
-  };
-  const resetData = () => {
-    setCounts([0, 0, 0, 0, 0]);
-    setHistory([]);
+    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
   };
 
-  // 設定画面から初期値がセットされた時の処理
-  const resetContext = (initialCounts: number[]) => {
-    setCounts(initialCounts);
-    // 履歴をリセットし、初期状態を記録
-    const now = new Date();
-    const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-    setHistory([{
-      time: timeString,
+  // --- データの更新（Firestoreへ書き込み） ---
+
+  // 1つ減らした時などに履歴を追加
+  const addHistory = async (newCounts: number[]) => {
+    const newEntry: HistoryData = {
+      time: getTimeString(),
+      p1: newCounts[0],
+      p2: newCounts[1],
+      p3: newCounts[2],
+      p4: newCounts[3],
+      p5: newCounts[4],
+    };
+
+    await updateDoc(doc(db, "prizes", docId), {
+      counts: newCounts,
+      history: [...history, newEntry] // 履歴を配列に追加
+    });
+  };
+
+  // 全リセット
+  const resetData = async () => {
+    await updateDoc(doc(db, "prizes", docId), {
+      counts: [0, 0, 0, 0, 0],
+      history: []
+    });
+  };
+
+  // 設定画面からの初期化
+  const resetContext = async (initialCounts: number[]) => {
+    const firstEntry: HistoryData = {
+      time: getTimeString(),
       p1: initialCounts[0],
       p2: initialCounts[1],
       p3: initialCounts[2],
       p4: initialCounts[3],
       p5: initialCounts[4],
-    }]);
+    };
+
+    await updateDoc(doc(db, "prizes", docId), {
+      counts: initialCounts,
+      history: [firstEntry] // 履歴をリセットして最初の1点を記録
+    });
   };
 
   return (
-    <PrizeContext.Provider value={{ counts, setCounts, history, addHistory, resetContext, resetData }}>
-      {children}
+    <PrizeContext.Provider value={{ counts, history, addHistory, resetContext, resetData, loading }}>
+      {/* 読み込みが終わるまで中身を表示しない、もしくはloadingを渡して各ページで処理 */}
+      {!loading && children}
     </PrizeContext.Provider>
   );
 }
-
-

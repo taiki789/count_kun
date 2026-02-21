@@ -57,14 +57,16 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
           <p className="text-sm text-gray-400">Total Items</p>
           <p className="text-3xl font-black text-blue-600">{total}</p>
         </div>
-        
-        <button
-          type="submit"
-          disabled={loading}
-          className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50`}
-        >
-          {loading ? "SAVING..." : "在庫を確定して開始"}
-        </button>
+
+        <Link href="/home">
+          <button
+            type="submit"
+            disabled={loading}
+            className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50`}
+          >
+            {loading ? "SAVING..." : "在庫を確定して開始"}
+          </button>
+        </Link>
       </div>
     </form>
   );
@@ -110,7 +112,7 @@ export default function SettingsPage() {
               onClick={handleLogout}
               className="px-6 py-2 border-2 border-red-100 text-red-500 rounded-full text-sm font-bold hover:bg-red-50 transition-colors"
             >
-              ログアウト
+            ログアウト
             </button>
           </div>
         </header>

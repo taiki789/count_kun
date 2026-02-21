@@ -58,15 +58,17 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
           <p className="text-3xl font-black text-blue-600">{total}</p>
         </div>
 
-        <Link href="/home">
-          <button
-            type="submit"
-            disabled={loading}
-            className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50`}
-          >
-            {loading ? "SAVING..." : "在庫を確定して開始"}
-          </button>
-        </Link>
+        
+        <button
+        type="submit"
+        disabled={loading}
+        className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50`}
+        >
+          {loading ? "SAVING..." : "在庫を確定"}
+        </button>
+      </div>
+      <div className="text-center text-sm text-gray-400">
+       <p>確定を完了しましたらホームへ戻るを押してください</p>
       </div>
     </form>
   );

@@ -140,7 +140,7 @@ export default function SettingsPage() {
         <CounterForm isMobile={true} />
         <div className="mt-10 flex flex-col items-center gap-6">
           <Link href="/home" className="text-blue-500 font-bold text-sm underline decoration-2 underline-offset-4">
-            保存せずにHOMEへ
+            HOMEへ
           </Link>
         </div>
       </div>

@@ -8,9 +8,19 @@ import { PrizeContext } from "../PrizeContext";
 import Link from "next/link";
 
 function CounterForm({ isMobile }: { isMobile: boolean }) {
-  const [numbers, setNumbers] = useState<string[]>(["", "", "", "", ""]);
+  const router = useRouter();
+  const { counts, prizeLabels, resetContext, currentDatasetId, startMeasurement } = useContext(PrizeContext);
+  const [numbers, setNumbers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const { resetContext } = useContext(PrizeContext);
+  const [initializedDatasetId, setInitializedDatasetId] = useState<string | null>(null);
+
+  // 初回表示時、またはデータセット切替時のみ入力欄を初期化
+  useEffect(() => {
+    if (counts.length > 0 && initializedDatasetId !== currentDatasetId) {
+      setNumbers(counts.map(c => String(c)));
+      setInitializedDatasetId(currentDatasetId);
+    }
+  }, [counts, currentDatasetId, initializedDatasetId]);
 
   const total = numbers.reduce((sum, n) => sum + (Number(n) || 0), 0);
 
@@ -25,20 +35,24 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
     setLoading(true);
     try {
       const numValues = numbers.map((n) => Number(n) || 0);
-      resetContext(numValues);
-      alert("設定を保存しました！");
+      await resetContext(numValues);
+      startMeasurement(); // 計測開始
+      router.push("/home");
+    } catch (error) {
+      console.error("在庫確定エラー:", error);
+      alert("在庫確定に失敗しました。");
     } finally {
       setLoading(false);
     }
   };
 
-  const inputFields = [1, 2, 3, 4, 5].map((rank, i) => (
+  const inputFields = numbers.map((value, i) => (
     <div key={i} className={`flex flex-col ${isMobile ? "w-full" : "flex-1"}`}>
-      <label className="text-xs font-bold text-gray-500 mb-1">{rank}等</label>
+      <label className="text-xs font-bold text-gray-500 mb-1">{prizeLabels[i] || `${i + 1}等`}</label>
       <input
         type="number"
         min="0"
-        value={numbers[i]}
+        value={value}
         placeholder="0"
         className="w-full rounded-xl border-2 border-gray-100 p-3 text-lg font-bold focus:border-blue-500 focus:outline-none text-black"
         onChange={(e) => handleChange(i, e.target.value)}
@@ -48,7 +62,12 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className={isMobile ? "space-y-4" : "flex gap-4 bg-gray-50 p-6 rounded-3xl"}>
+      {numbers.length === 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          データセットを選択してから設定してください。
+        </div>
+      )}
+      <div className={isMobile ? "space-y-4" : numbers.length <= 5 ? "flex gap-4 bg-gray-50 p-6 rounded-3xl" : "grid grid-cols-5 gap-4 bg-gray-50 p-6 rounded-3xl"}>
         {inputFields}
       </div>
 
@@ -61,14 +80,14 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
         
         <button
         type="submit"
-        disabled={loading}
+        disabled={loading || numbers.length === 0}
         className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50`}
         >
           {loading ? "SAVING..." : "在庫を確定"}
         </button>
       </div>
       <div className="text-center text-sm text-gray-400">
-       <p>確定を完了しましたらホームへ戻るを押してください</p>
+       <p>在庫確定後は自動でホーム画面へ移動します</p>
       </div>
     </form>
   );

@@ -56,13 +56,18 @@ export default function LoginPage() {
 
         {user ? (
           <div>
-            <p className="mb-2">{user.email}</p>
-            <div className="flex gap-2">
-              <Link href="/home" className="rounded bg-blue-600 px-4 py-2 text-white">
-                ホームへ
+            <p className="mb-4 text-gray-600">{user.email}</p>
+            <div className="flex flex-col gap-2">
+              <Link href="/select-dataset" className="w-full rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-white text-center font-black transition">
+                データセットを選択
               </Link>
+              {user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL && (
+                <Link href="/admin" className="w-full rounded bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 text-center font-black transition">
+                  🔐 管理者ページ
+                </Link>
+              )}
               <button
-                className="rounded border px-4 py-2"
+                className="w-full rounded border border-gray-300 hover:bg-gray-50 px-4 py-2 transition"
                 onClick={handleSignOut}
               >
                 サインアウト

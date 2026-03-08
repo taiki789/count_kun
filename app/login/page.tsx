@@ -76,9 +76,11 @@ export default function LoginPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-            <label className="flex flex-col text-sm">
+            <label htmlFor="email-input" className="flex flex-col text-sm">
               Email
               <input
+                id="email-input"
+                name="email"
                 className="mt-1 rounded border px-2 py-1"
                 type="email"
                 value={email}
@@ -87,9 +89,11 @@ export default function LoginPage() {
               />
             </label>
 
-            <label className="flex flex-col text-sm">
+            <label htmlFor="password-input" className="flex flex-col text-sm">
               Password
               <input
+                id="password-input"
+                name="password"
                 className="mt-1 rounded border px-2 py-1"
                 type="password"
                 value={password}

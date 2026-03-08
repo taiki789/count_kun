@@ -38,7 +38,7 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
     try {
       const numValues = numbers.map((n) => Number(n) || 0);
       await resetContext(numValues);
-      startMeasurement(); // 計測開始
+      await startMeasurement(); // 計測開始
       router.push("/home");
     } catch (error) {
       console.error("在庫確定エラー:", error);
@@ -50,8 +50,10 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
 
   const inputFields = numbers.map((value, i) => (
     <div key={i} className={`flex flex-col ${isMobile ? "w-full" : "flex-1"}`}>
-      <label className="text-xs font-bold text-gray-500 mb-1">{prizeLabels[i] || `${i + 1}等`}</label>
+      <label htmlFor={`input-${i}`} className="text-xs font-bold text-gray-500 mb-1">{prizeLabels[i] || `${i + 1}等`}</label>
       <input
+        id={`input-${i}`}
+        name={`inventory-${i}`}
         type="number"
         min="0"
         value={value}

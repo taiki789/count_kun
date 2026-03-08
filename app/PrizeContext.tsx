@@ -22,6 +22,8 @@ export type Dataset = {
   initialCounts?: number[];
   createdAt: string;
   updatedAt: string;
+  measuring?: boolean;
+  startTimestamp?: number | null;
 };
 
 type PrizeContextType = {
@@ -42,8 +44,8 @@ type PrizeContextType = {
   // 計測関連
   measuring: boolean;
   startTimestamp: number | null;
-  startMeasurement: () => void;
-  endMeasurement: () => void;
+  startMeasurement: () => Promise<void>;
+  endMeasurement: () => Promise<void>;
 };
 
 export const PrizeContext = createContext<PrizeContextType>({} as PrizeContextType);
@@ -108,6 +110,16 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
             setCounts(newCached.counts);
             setHistory(newCached.history);
             setPrizeLabels(newCached.prizeLabels);
+            
+            // 計測状態も同期
+            if (typeof data.measuring === 'boolean') {
+              setMeasuring(data.measuring);
+            }
+            if (typeof data.startTimestamp === 'number') {
+              setStartTimestamp(data.startTimestamp);
+            } else if (data.startTimestamp === null) {
+              setStartTimestamp(null);
+            }
           }
         } catch {
           // キャッシュ表示は成功しているため、バックグラウンド取得失敗は致命扱いにしない
@@ -131,6 +143,16 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
       setPrizeLabels(newPrizeLabels);
       setCurrentDatasetId(normalizedId);
       localStorage.setItem('selectedDatasetId', normalizedId);
+      
+      // 計測状態も同期
+      if (typeof data.measuring === 'boolean') {
+        setMeasuring(data.measuring);
+      }
+      if (typeof data.startTimestamp === 'number') {
+        setStartTimestamp(data.startTimestamp);
+      } else if (data.startTimestamp === null) {
+        setStartTimestamp(null);
+      }
       
       // キャッシュに保存
       setDatasetCache(prev => ({
@@ -203,6 +225,16 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
           setCounts(prev => JSON.stringify(prev) === JSON.stringify(newCounts) ? prev : newCounts);
           setHistory(prev => JSON.stringify(prev) === JSON.stringify(newHistory) ? prev : newHistory);
           setPrizeLabels(prev => JSON.stringify(prev) === JSON.stringify(newPrizeLabels) ? prev : newPrizeLabels);
+          
+          // 計測状態も同期
+          if (typeof data.measuring === 'boolean') {
+            setMeasuring(data.measuring);
+          }
+          if (typeof data.startTimestamp === 'number') {
+            setStartTimestamp(data.startTimestamp);
+          } else if (data.startTimestamp === null) {
+            setStartTimestamp(null);
+          }
           
           // キャッシュも同時に更新
           setDatasetCache(prev => ({
@@ -474,13 +506,41 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const startMeasurement = () => {
-    setMeasuring(true);
-    setStartTimestamp(Date.now());
+  const startMeasurement = async () => {
+    if (!currentDatasetId) return;
+    
+    try {
+      const res = await fetch(`/api/datasets/${currentDatasetId}/operations`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'startMeasurement' }),
+      });
+      if (!res.ok) throw new Error('Failed to start measurement');
+      
+      setMeasuring(true);
+      setStartTimestamp(Date.now());
+    } catch (error) {
+      console.error('startMeasurement error:', error);
+      throw error;
+    }
   };
 
-  const endMeasurement = () => {
-    setMeasuring(false);
+  const endMeasurement = async () => {
+    if (!currentDatasetId) return;
+    
+    try {
+      const res = await fetch(`/api/datasets/${currentDatasetId}/operations`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'endMeasurement' }),
+      });
+      if (!res.ok) throw new Error('Failed to end measurement');
+      
+      setMeasuring(false);
+    } catch (error) {
+      console.error('endMeasurement error:', error);
+      throw error;
+    }
   };
 
   return (

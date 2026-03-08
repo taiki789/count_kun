@@ -15,13 +15,23 @@ export default function Home() {
   const { counts, history, prizeLabels, addHistory, addMemoPoint, resetData, loading, measuring, endMeasurement } = useContext(PrizeContext);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isPageVisible, setIsPageVisible] = useState(true);
   const [memoPointInput, setMemoPointInput] = useState("");
   const [memoPointPrizeIndex, setMemoPointPrizeIndex] = useState(0);
   const [isSavingMemoPoint, setIsSavingMemoPoint] = useState(false);
+  const [inAppNotification, setInAppNotification] = useState<{ title: string; body: string } | null>(null);
   const notificationRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const inAppNotificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousHistoryLengthRef = useRef(0);
   const isHistoryWatcherReadyRef = useRef(false);
+
+  // 初期化時のロギング
+  React.useEffect(() => {
+    console.log("[ホーム画面] 初期化完了");
+    console.log("[環境] HTTPSコンテキスト:", window.isSecureContext);
+    console.log("[環境] ホスト名:", window.location.hostname);
+    console.log("[Notification API] サポート:", "Notification" in window);
+    console.log("[Service Worker API] サポート:", "serviceWorker" in navigator);
+  }, []);
 
   // 賞品数に応じて色を動的に生成
   const baseColors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#f43f5e", "#06b6d4", "#10b981", "#6366f1", "#a855f7", "#14b8a6", "#f59e0b", "#84cc16", "#64748b", "#dc2626", "#7c3aed", "#db2777", "#0ea5e9"];
@@ -61,64 +71,110 @@ export default function Home() {
     }
   }, [canUseBrowserNotifications]);
 
-  // メモ通知を送信（ログイン中かつページ非表示時のみ）
+  const showInAppNotification = useCallback((title: string, body: string) => {
+    setInAppNotification({ title, body });
+
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate(120);
+    }
+
+    if (inAppNotificationTimerRef.current) {
+      clearTimeout(inAppNotificationTimerRef.current);
+    }
+
+    inAppNotificationTimerRef.current = setTimeout(() => {
+      setInAppNotification(null);
+      inAppNotificationTimerRef.current = null;
+    }, 4500);
+  }, []);
+
+  // メモ通知を送信（コメント追加時に常に通知）
   const sendMemoNotification = useCallback(async (prizeLabel: string, memoContent: string) => {
-    if (!isLoggedIn || isPageVisible) return;
+    console.log("[通知] 通知送信開始:", { prizeLabel, memoContent, isLoggedIn });
     
-    if (!canUseBrowserNotifications()) return;
+    if (!isLoggedIn) {
+      console.log("[通知] ログインしていないため通知中止");
+      return;
+    }
+
+    const title = "コメントが追加されました";
+    const body = `${prizeLabel}: ${memoContent}`;
+    const tag = `memo-notification-${Date.now()}`;
+
+    const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobileDevice) {
+      showInAppNotification(title, body);
+    }
+
+    if (!canUseBrowserNotifications()) {
+      console.log("[通知] ブラウザが通知APIをサポートしていません");
+      showInAppNotification(title, body);
+      return;
+    }
 
     try {
       const hasPermission = await requestNotificationPermission();
-      if (!hasPermission) return;
+      console.log("[通知] 権限確認結果:", hasPermission);
+      if (!hasPermission) {
+        console.log("[通知] 通知権限がありません");
+        showInAppNotification(title, body);
+        return;
+      }
 
       const notificationOptions: NotificationOptions = {
-        body: `${prizeLabel}: ${memoContent}`,
+        body,
         icon: "/favicon.ico",
         badge: "/favicon.ico",
-        tag: "memo-notification",
+        tag,
         requireInteraction: false,
         silent: false,
       };
 
-      if (typeof navigator.serviceWorker !== "undefined" && notificationRegistrationRef.current) {
-        await notificationRegistrationRef.current.showNotification("コメントが追加されました", notificationOptions);
-        return;
+      console.log("[通知] Service Worker登録状態:", notificationRegistrationRef.current ? "登録済み" : "未登録");
+
+      if (typeof navigator.serviceWorker !== "undefined") {
+        const registration = notificationRegistrationRef.current ?? await navigator.serviceWorker.ready;
+        notificationRegistrationRef.current = registration;
+
+        if (registration?.showNotification) {
+          console.log("[通知] ServiceWorkerRegistration.showNotification を実行");
+          await registration.showNotification(title, {
+            body,
+            icon: "/favicon.ico",
+            badge: "/favicon.ico",
+            tag,
+            requireInteraction: false,
+            silent: false,
+          });
+          return;
+        }
+
+        if (navigator.serviceWorker.controller) {
+          console.log("[通知] Service Worker message 経由で送信");
+          navigator.serviceWorker.controller.postMessage({
+            type: "SEND_NOTIFICATION",
+            payload: {
+              title,
+              body,
+              icon: "/favicon.ico",
+              tag,
+            },
+          });
+          return;
+        }
       }
 
-      const notification = new Notification("コメントが追加されました", notificationOptions);
+      console.log("[通知] 直接APIで通知を送信");
+      const notification = new Notification(title, notificationOptions);
       notification.onclick = () => {
         window.focus();
         notification.close();
       };
     } catch (error) {
       console.error("[通知エラー]", error);
+      showInAppNotification(title, body);
     }
-  }, [isLoggedIn, isPageVisible, requestNotificationPermission, canUseBrowserNotifications]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-
-    navigator.serviceWorker
-      .register("/sw.js")
-      .then((registration) => {
-        notificationRegistrationRef.current = registration;
-      })
-      .catch((error) => {
-        console.error("Service Worker registration error:", error);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-
-    const updateVisibility = () => {
-      setIsPageVisible(document.visibilityState === "visible");
-    };
-
-    updateVisibility();
-    document.addEventListener("visibilitychange", updateVisibility);
-    return () => document.removeEventListener("visibilitychange", updateVisibility);
-  }, []);
+  }, [isLoggedIn, requestNotificationPermission, canUseBrowserNotifications, showInAppNotification]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -133,6 +189,31 @@ export default function Home() {
     });
     return () => unsub();
   }, [router, adminEmail]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
+      console.log("[Service Worker] ブラウザがサポートしていません");
+      return;
+    }
+
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => {
+        console.log("[Service Worker] 登録成功:", registration);
+        notificationRegistrationRef.current = registration;
+      })
+      .catch((error) => {
+        console.error("[Service Worker] 登録失敗:", error);
+      });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (inAppNotificationTimerRef.current) {
+        clearTimeout(inAppNotificationTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isHistoryWatcherReadyRef.current) {
@@ -207,10 +288,13 @@ export default function Home() {
     setIsSavingMemoPoint(true);
     try {
       await addMemoPoint(memoPointPrizeIndex, normalizedMemo);
-      setMemoPointInput("");
 
-      // 通知権限はユーザー操作時に先行取得しておく
-      void requestNotificationPermission();
+      // コメント記録後に即座に通知を送信
+      const prizeLabel = prizeLabels[memoPointPrizeIndex] || `${memoPointPrizeIndex + 1}等`;
+      console.log("[コメント記録] プッシュ通知を実行:", { prizeLabel, normalizedMemo });
+      await sendMemoNotification(prizeLabel, normalizedMemo);
+
+      setMemoPointInput("");
     } catch (error) {
       console.error("メモ点追加エラー:", error);
       alert("メモ付きデータ点の記録に失敗しました");
@@ -360,6 +444,12 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] pb-24 md:pb-0 font-sans">
+      {inAppNotification && (
+        <div className="fixed top-4 left-1/2 z-[100] w-[92%] max-w-md -translate-x-1/2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-xl">
+          <p className="text-sm font-black text-amber-900">{inAppNotification.title}</p>
+          <p className="mt-1 text-xs font-semibold text-amber-800 break-words">{inAppNotification.body}</p>
+        </div>
+      )}
       
       {/* --- PC版 --- */}
       <div className="hidden md:flex flex-col h-screen">
@@ -379,12 +469,16 @@ export default function Home() {
               📊 データセット変更
             </button>
             <button 
-              onClick={() => {
-                endMeasurement();
-                if (typeof window !== "undefined") {
-                  sessionStorage.setItem("measurementEndedLockBack", "1");
+              onClick={async () => {
+                try {
+                  await endMeasurement();
+                  if (typeof window !== "undefined") {
+                    sessionStorage.setItem("measurementEndedLockBack", "1");
+                  }
+                  router.replace("/results");
+                } catch (error) {
+                  console.error("計測終了エラー:", error);
                 }
-                router.replace("/results");
               }}
               disabled={!measuring}
               className={`text-[10px] font-black px-5 py-2 rounded-full transition-all tracking-widest shadow-lg ${
@@ -499,13 +593,15 @@ export default function Home() {
                   placeholder="ここにコメントを入力"
                   className="w-full h-20 p-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300 resize-none"
                 />
-                <button
-                  onClick={handleAddMemoPointFromPanel}
-                  disabled={isSavingMemoPoint}
-                  className="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {isSavingMemoPoint ? "記録中..." : "コメントを記録"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAddMemoPointFromPanel}
+                    disabled={isSavingMemoPoint}
+                    className="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isSavingMemoPoint ? "記録中..." : "コメントを記録"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -522,12 +618,16 @@ export default function Home() {
             <div className="flex gap-2">
               {measuring && (
                 <button 
-                  onClick={() => {
-                    endMeasurement();
-                    if (typeof window !== "undefined") {
-                      sessionStorage.setItem("measurementEndedLockBack", "1");
+                  onClick={async () => {
+                    try {
+                      await endMeasurement();
+                      if (typeof window !== "undefined") {
+                        sessionStorage.setItem("measurementEndedLockBack", "1");
+                      }
+                      router.replace("/results");
+                    } catch (error) {
+                      console.error("計測終了エラー:", error);
                     }
-                    router.replace("/results");
                   }}
                   className="text-[8px] font-black text-white bg-red-500 px-3 py-1 rounded-full"
                 >
@@ -614,23 +714,29 @@ export default function Home() {
               placeholder="ここにコメントを入力"
               className="w-full h-20 p-3 rounded-lg border border-gray-200 bg-white text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300 resize-none"
             />
-            <button
-              onClick={handleAddMemoPointFromPanel}
-              disabled={isSavingMemoPoint}
-              className="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
-            >
-              {isSavingMemoPoint ? "記録中..." : "コメントを記録"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleAddMemoPointFromPanel}
+                disabled={isSavingMemoPoint}
+                className="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
+              >
+                {isSavingMemoPoint ? "記録中..." : "コメントを記録"}
+              </button>
+            </div>
           </div>
           
           <div className="flex gap-3 mb-3">
             <button 
-              onClick={() => {
-                endMeasurement();
-                if (typeof window !== "undefined") {
-                  sessionStorage.setItem("measurementEndedLockBack", "1");
+              onClick={async () => {
+                try {
+                  await endMeasurement();
+                  if (typeof window !== "undefined") {
+                    sessionStorage.setItem("measurementEndedLockBack", "1");
+                  }
+                  router.replace("/results");
+                } catch (error) {
+                  console.error("計測終了エラー:", error);
                 }
-                router.replace("/results");
               }}
               disabled={!measuring}
               className={`flex-1 py-3 font-black rounded-xl transition-all active:scale-[0.98] text-sm ${

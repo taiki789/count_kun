@@ -286,6 +286,8 @@ export default function Admin() {
                   データセット名
                 </label>
                 <input
+                  id="dataset-name"
+                  name="dataset-name"
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -300,6 +302,8 @@ export default function Admin() {
                   賞品数
                 </label>
                 <select
+                  id="prize-count"
+                  name="prize-count"
                   value={prizeCount}
                   onChange={(e) => handlePrizeCountChange(Number(e.target.value))}
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-900 focus:border-indigo-500 focus:outline-none"
@@ -320,6 +324,8 @@ export default function Admin() {
                     <div key={i}>
                       <p className="text-xs text-gray-500 mb-1 text-center">{i + 1}枠</p>
                       <input
+                        id={`prizeLabel-${i}`}
+                        name={`prizeLabel-${i}`}
                         type="text"
                         value={formData.prizeLabels[i] || ""}
                         onChange={(e) => handleCreateLabelChange(i, e.target.value)}
@@ -343,6 +349,8 @@ export default function Admin() {
                         {formData.prizeLabels[i] && formData.prizeLabels[i].trim() ? formData.prizeLabels[i] : `${i + 1}等`}
                       </p>
                       <input
+                        id={`count-${i}`}
+                        name={`count-${i}`}
                         type="number"
                         min="0"
                         value={formData.counts[i] || "0"}
@@ -445,6 +453,8 @@ export default function Admin() {
                     データ数
                   </label>
                   <select
+                    id="edit-prize-count"
+                    name="edit-prize-count"
                     value={editPrizeCount}
                     onChange={(e) => handleEditPrizeCountChange(Number(e.target.value))}
                     className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-900 focus:border-indigo-500 focus:outline-none"
@@ -464,6 +474,8 @@ export default function Admin() {
                       <div key={i}>
                         <p className="text-xs text-gray-500 mb-1 text-center">{i + 1}枠</p>
                         <input
+                          id={`editPrizeLabel-${i}`}
+                          name={`editPrizeLabel-${i}`}
                           type="text"
                           value={editPrizeLabels[i] || ""}
                           onChange={(e) => handleEditLabelChange(i, e.target.value)}

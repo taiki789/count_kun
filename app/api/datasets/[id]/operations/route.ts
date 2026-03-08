@@ -137,6 +137,23 @@ export async function PATCH(
       return NextResponse.json({ message: "Memo Added Success", updated: true });
     }
 
+    if (action === 'startMeasurement') {
+      await docRef.update({
+        measuring: true,
+        startTimestamp: Date.now(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return NextResponse.json({ message: "Measurement Started", updated: true });
+    }
+
+    if (action === 'endMeasurement') {
+      await docRef.update({
+        measuring: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return NextResponse.json({ message: "Measurement Ended", updated: true });
+    }
+
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
   } catch (error: unknown) {

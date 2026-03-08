@@ -14,7 +14,7 @@ function getAdminDB() {
       let parsedKey;
       try {
         parsedKey = JSON.parse(key);
-      } catch (parseError) {
+      } catch {
         throw new Error(`FIREBASE_ADMIN_SDK_KEY is not valid JSON`);
       }
       initializeApp({
@@ -29,20 +29,23 @@ function getAdminDB() {
 }
 
 // GET: 全デザセット一覧取得
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const adminDb = getAdminDB();
     const datasetsRef = adminDb.collection('datasets');
     const snapshot = await datasetsRef.orderBy('createdAt', 'desc').get();
     
-    const datasets = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: (doc.data() as any).createdAt?.toDate().toISOString() || new Date().toISOString(),
-    }));
+    const datasets = snapshot.docs.map(doc => {
+      const data = doc.data() as Record<string, unknown>;
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: (data.createdAt as { toDate: () => Date } | undefined)?.toDate().toISOString() || new Date().toISOString(),
+      };
+    });
     
     return NextResponse.json({ datasets });
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Get datasets error:", errorMessage);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
@@ -53,8 +56,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const adminDb = getAdminDB();
-    const body = await request.json();
-    const { name, initialCounts = [50, 30, 20, 10, 5], prizeLabels } = body;
+    const body = await request.json() as Record<string, unknown>;
+    const name = body.name as string;
+    const initialCounts = (body.initialCounts as number[]) || [50, 30, 20, 10, 5];
+    const prizeLabels = body.prizeLabels as unknown[];
     
     if (!name || name.trim() === '') {
       return NextResponse.json({ error: "Dataset name is required" }, { status: 400 });
@@ -79,6 +84,8 @@ export async function POST(request: Request) {
       initialCounts: initialCounts,
       prizeLabels: safePrizeLabels,
       history: [],
+      measuring: false,
+      startTimestamp: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -91,7 +98,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Create dataset error:", errorMessage);
     return NextResponse.json({ error: errorMessage }, { status: 500 });

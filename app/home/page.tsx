@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useContext, useEffect, useState } from "react";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -12,43 +12,175 @@ import {
 
 export default function Home() {
   const router = useRouter();
-  const { counts, history, prizeLabels, addHistory, resetData, loading, currentDatasetId, measuring, startMeasurement, endMeasurement } = useContext(PrizeContext);
+  const { counts, history, prizeLabels, addHistory, addMemoPoint, resetData, loading, measuring, endMeasurement } = useContext(PrizeContext);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [datasetLoaded, setDatasetLoaded] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isPageVisible, setIsPageVisible] = useState(true);
+  const [memoPointInput, setMemoPointInput] = useState("");
+  const [memoPointPrizeIndex, setMemoPointPrizeIndex] = useState(0);
+  const [isSavingMemoPoint, setIsSavingMemoPoint] = useState(false);
+  const notificationRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const previousHistoryLengthRef = useRef(0);
+  const isHistoryWatcherReadyRef = useRef(false);
 
   // 賞品数に応じて色を動的に生成
   const baseColors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#f43f5e", "#06b6d4", "#10b981", "#6366f1", "#a855f7", "#14b8a6", "#f59e0b", "#84cc16", "#64748b", "#dc2626", "#7c3aed", "#db2777", "#0ea5e9"];
   const colors = counts.map((_, i) => baseColors[i % baseColors.length]);
   const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
 
+  const canUseBrowserNotifications = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    if (!("Notification" in window)) return false;
+
+    if (window.isSecureContext) return true;
+
+    const host = window.location.hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  }, []);
+
+  // 通知許可をリクエスト（初回のみ）
+  const requestNotificationPermission = useCallback(async () => {
+    if (!canUseBrowserNotifications()) {
+      return false;
+    }
+
+    if (Notification.permission === "granted") {
+      return true;
+    }
+
+    if (Notification.permission === "denied") {
+      return false;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      return permission === "granted";
+    } catch (error) {
+      console.error("通知許可リクエストエラー:", error);
+      return false;
+    }
+  }, [canUseBrowserNotifications]);
+
+  // メモ通知を送信（ログイン中かつページ非表示時のみ）
+  const sendMemoNotification = useCallback(async (prizeLabel: string, memoContent: string) => {
+    if (!isLoggedIn || isPageVisible) return;
+    
+    if (!canUseBrowserNotifications()) return;
+
+    try {
+      const hasPermission = await requestNotificationPermission();
+      if (!hasPermission) return;
+
+      const notificationOptions: NotificationOptions = {
+        body: `${prizeLabel}: ${memoContent}`,
+        icon: "/favicon.ico",
+        badge: "/favicon.ico",
+        tag: "memo-notification",
+        requireInteraction: false,
+        silent: false,
+      };
+
+      if (typeof navigator.serviceWorker !== "undefined" && notificationRegistrationRef.current) {
+        await notificationRegistrationRef.current.showNotification("コメントが追加されました", notificationOptions);
+        return;
+      }
+
+      const notification = new Notification("コメントが追加されました", notificationOptions);
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+    } catch (error) {
+      console.error("[通知エラー]", error);
+    }
+  }, [isLoggedIn, isPageVisible, requestNotificationPermission, canUseBrowserNotifications]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => {
+        notificationRegistrationRef.current = registration;
+      })
+      .catch((error) => {
+        console.error("Service Worker registration error:", error);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const updateVisibility = () => {
+      setIsPageVisible(document.visibilityState === "visible");
+    };
+
+    updateVisibility();
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
+      setIsLoggedIn(Boolean(user));
       if (!user) {
         router.push("/");
       } else if (user.email === adminEmail) {
         setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
       }
     });
     return () => unsub();
   }, [router, adminEmail]);
 
-  // データセットが切り替わった時に検知してデータローディング完了待機
   useEffect(() => {
-    if (currentDatasetId && counts.length > 0) {
-      console.log(`📊 Dataset ready on homepage:`, { 
-        currentDatasetId, 
-        counts, 
-        historyLength: history.length,
-        historyData: history.slice(0, 3) // 最初の3件を確認
-      });
-      setDatasetLoaded(true);
+    if (!isHistoryWatcherReadyRef.current) {
+      previousHistoryLengthRef.current = history.length;
+      isHistoryWatcherReadyRef.current = true;
+      return;
     }
-  }, [currentDatasetId, counts, history]);
+
+    if (history.length <= previousHistoryLengthRef.current) {
+      previousHistoryLengthRef.current = history.length;
+      return;
+    }
+
+    const newEntries = history.slice(previousHistoryLengthRef.current);
+    previousHistoryLengthRef.current = history.length;
+
+    const latestMemoEntry = [...newEntries]
+      .reverse()
+      .find((entry) => typeof entry.memo === "string" && entry.memo.trim().length > 0);
+
+    if (!latestMemoEntry || typeof latestMemoEntry.memo !== "string") {
+      return;
+    }
+
+    const memoTargetIndex =
+      typeof latestMemoEntry.memoPrizeIndex === "number" && latestMemoEntry.memoPrizeIndex >= 0
+        ? latestMemoEntry.memoPrizeIndex
+        : null;
+    const prizeLabel = memoTargetIndex !== null
+      ? (prizeLabels[memoTargetIndex] || `${memoTargetIndex + 1}等`)
+      : "コメント";
+
+    void sendMemoNotification(prizeLabel, latestMemoEntry.memo);
+  }, [history, prizeLabels, sendMemoNotification]);
+
+
+
+  // データ数変更時のメモ対象インデックス調整
+  useEffect(() => {
+    if (memoPointPrizeIndex >= counts.length) {
+      setMemoPointPrizeIndex(0);
+    }
+  }, [counts.length, memoPointPrizeIndex]);
 
   // 時間フォーマット関数 (Unixタイムスタンプを HH:mm 形式へ)
-  const formatTime = (tick: any) => {
+  const formatTime = (tick: number | string) => {
     if (!tick) return "";
-    const date = new Date(tick);
+    const date = new Date(typeof tick === 'number' ? tick : parseInt(tick, 10));
     return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
   };
 
@@ -65,6 +197,28 @@ export default function Home() {
     }
   };
 
+  const handleAddMemoPointFromPanel = async () => {
+    const normalizedMemo = memoPointInput.trim();
+    if (!normalizedMemo) {
+      alert("メモを入力してください");
+      return;
+    }
+
+    setIsSavingMemoPoint(true);
+    try {
+      await addMemoPoint(memoPointPrizeIndex, normalizedMemo);
+      setMemoPointInput("");
+
+      // 通知権限はユーザー操作時に先行取得しておく
+      void requestNotificationPermission();
+    } catch (error) {
+      console.error("メモ点追加エラー:", error);
+      alert("メモ付きデータ点の記録に失敗しました");
+    } finally {
+      setIsSavingMemoPoint(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
@@ -77,25 +231,85 @@ export default function Home() {
   }
 
   // グラフ描画用コンポーネント（動的に賞品数に対応）
-  const renderChangedOnlyDot = (seriesIndex: number, color: string) => (dotProps: any) => {
-    const { cx, cy, payload, index } = dotProps || {};
+  // eslint-disable-next-line react/display-name
+  const renderChangedOnlyDot = (seriesIndex: number, color: string) => (dotProps: Record<string, unknown>) => {
+    const cx = dotProps?.cx as number | undefined;
+    const cy = dotProps?.cy as number | undefined;
+    const payload = dotProps?.payload as Record<string, unknown> | undefined;
+    const index = dotProps?.index as number | undefined;
+    
     if (typeof cx !== "number" || typeof cy !== "number") return null;
 
     const changedKey = `changedP${seriesIndex + 1}`;
     const valueKey = `p${seriesIndex + 1}`;
     const changedByFlag = payload?.[changedKey] === true;
+    const memoText = typeof payload?.memo === "string" ? payload.memo.trim() : "";
+    const hasMemo = memoText.length > 0;
+    const memoPrizeIndex = typeof payload?.memoPrizeIndex === "number" ? payload.memoPrizeIndex : null;
+    const hasMemoForThisSeries = hasMemo && (memoPrizeIndex === null || memoPrizeIndex === seriesIndex);
 
     let changedByDiff = false;
     if (!changedByFlag && typeof index === "number" && index > 0) {
-      const prev = history[index - 1] as any;
-      const prevValue = prev?.[valueKey];
-      const currentValue = payload?.[valueKey];
+      const prev = history[index - 1] as unknown as Record<string, unknown> | undefined;
+      const prevValue = prev?.[valueKey] as number | undefined;
+      const currentValue = payload?.[valueKey] as number | undefined;
       changedByDiff = typeof prevValue === "number" && typeof currentValue === "number" && prevValue !== currentValue;
     }
 
-    if (!changedByFlag && !changedByDiff) return null;
+    // カウント変化があるか、またはメモがあれば点を表示
+    if (!changedByFlag && !changedByDiff && !hasMemoForThisSeries) return null;
 
-    return <circle cx={cx} cy={cy} r={4} fill={color} stroke="#fff" strokeWidth={2} />;
+    return (
+      <circle 
+        cx={cx} 
+        cy={cy} 
+        r={hasMemoForThisSeries ? 6 : 4} 
+        fill={hasMemoForThisSeries ? "#fbbf24" : color} 
+        stroke="#fff" 
+        strokeWidth={2}
+      />
+    );
+  };
+
+  const renderTooltipContent = (tooltipProps: Record<string, unknown>) => {
+    const active = tooltipProps.active === true;
+    const payloadList = (tooltipProps.payload as Record<string, unknown>[] | undefined) || [];
+    if (!active || payloadList.length === 0) return null;
+
+    const firstItem = payloadList[0] as Record<string, unknown>;
+    const point = (firstItem?.payload as Record<string, unknown> | undefined) || {};
+    const memoText = typeof point.memo === "string" ? point.memo.trim() : "";
+    const memoPrizeIndexRaw = point.memoPrizeIndex;
+    const memoPrizeIndex = typeof memoPrizeIndexRaw === "number" && memoPrizeIndexRaw >= 0 ? memoPrizeIndexRaw : null;
+    const memoLabel = memoPrizeIndex !== null
+      ? (prizeLabels[memoPrizeIndex] || `${memoPrizeIndex + 1}等`)
+      : "未指定";
+    const memoColor = memoPrizeIndex !== null
+      ? (colors[memoPrizeIndex] || baseColors[memoPrizeIndex % baseColors.length])
+      : "#6b7280";
+
+    return (
+      <div className="rounded-2xl bg-white/95 px-4 py-3 shadow-xl border border-gray-100">
+        <p className="text-sm font-bold text-gray-900 mb-2">時刻: {formatTime(tooltipProps.label as number | string)}</p>
+        <div className="space-y-1">
+          {payloadList.map((item, idx) => {
+            const row = item as Record<string, unknown>;
+            const name = row.name as string | undefined;
+            if (!name || name === "time" || name.startsWith("changed")) return null;
+            return (
+              <p key={`tooltip-row-${idx}`} style={{ color: (row.color as string) || "#111827" }} className="text-sm font-bold">
+                {name}: {String(row.value ?? "")}
+              </p>
+            );
+          })}
+          {memoText && (
+            <p className="text-xs font-bold pt-2" style={{ color: memoColor }}>
+              コメント ({memoLabel}): {memoText}
+            </p>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const renderLineContent = () => counts.map((_, i) => (
@@ -112,6 +326,38 @@ export default function Home() {
     />
   ));
 
+  const buildSnapshotEntry = (timestamp: number) =>
+    counts.reduce<Record<string, number | string | boolean>>(
+      (acc, count, index) => {
+        acc[`p${index + 1}`] = count;
+        acc[`changedP${index + 1}`] = false;
+        return acc;
+      },
+      {
+        timestamp,
+        time: "--:--",
+      }
+    );
+
+  const chartData = (() => {
+    if (history.length === 0) {
+      const now = Date.now();
+      return [buildSnapshotEntry(now - 60_000), buildSnapshotEntry(now)];
+    }
+
+    if (history.length === 1) {
+      const only = history[0] as Record<string, unknown>;
+      const onlyTs = Number(only?.timestamp);
+      const safeTs = Number.isFinite(onlyTs) ? onlyTs : Date.now();
+      const prev = { ...only, timestamp: safeTs - 60_000, time: "--:--" };
+      return [prev, only];
+    }
+
+    return history;
+  })();
+
+  const xAxisPaddingMs = 2 * 60 * 1000;
+
   return (
     <div className="min-h-screen bg-[#F8F9FA] pb-24 md:pb-0 font-sans">
       
@@ -120,6 +366,7 @@ export default function Home() {
         <header className="bg-white border-b px-10 py-5 flex justify-between items-center shadow-sm">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push("/select-dataset")}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/favicon.ico" alt="icon" className="w-10 h-10" />
               <h1 className="text-2xl font-black text-gray-900 tracking-tighter">Count kun</h1>
             </div>
@@ -175,48 +422,43 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden p-10 grid grid-cols-12 gap-10">
-          <div className="col-span-8 bg-white p-8 rounded-[32px] shadow-xl shadow-gray-200/50 border border-gray-100">
-            {history.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-gray-400">
-                <div className="text-center">
-                  <p className="text-sm font-semibold mb-2">グラフデータなし</p>
-                  <p className="text-xs text-gray-300">DRAW ボタンでカウントを記録してください</p>
-                </div>
+        <main className="flex-1 overflow-y-auto p-10 grid grid-cols-12 gap-6 auto-rows-min">
+          <div className="col-span-8 h-[50vh] bg-white p-8 rounded-[32px] shadow-xl shadow-gray-200/50 border border-gray-100 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
+                <XAxis 
+                  dataKey="timestamp" // UnixTimeを使用
+                  type="number"       // これにより時間幅が可変になる
+                  domain={[
+                    `dataMin - ${xAxisPaddingMs}`,
+                    `dataMax + ${xAxisPaddingMs}`,
+                  ]} 
+                  tickFormatter={formatTime}
+                  fontSize={12}
+                  tickMargin={15}
+                  axisLine={false}
+                  tickLine={false}
+                  stroke="#ADB5BD"
+                />
+                <YAxis fontSize={12} axisLine={false} tickLine={false} stroke="#ADB5BD" />
+                <Tooltip 
+                  content={renderTooltipContent}
+                />
+                <Legend iconType="circle" verticalAlign="top" align="right" height={50} />
+                {renderLineContent()}
+              </LineChart>
+            </ResponsiveContainer>
+            {history.length === 0 && (
+              <div className="absolute left-8 top-8 rounded-lg bg-white/90 px-3 py-2 border border-gray-100 text-xs text-gray-500">
+                グラフデータなし（現在在庫を表示中）
               </div>
-            ) : (
-              <>
-                {console.log(`📈 Rendering graph with ${history.length} data points:`, history)}
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={history} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
-                    <XAxis 
-                      dataKey="timestamp" // UnixTimeを使用
-                      type="number"       // これにより時間幅が可変になる
-                      domain={['dataMin', 'dataMax']} 
-                      tickFormatter={formatTime}
-                      fontSize={12}
-                      tickMargin={15}
-                      axisLine={false}
-                      tickLine={false}
-                      stroke="#ADB5BD"
-                    />
-                    <YAxis fontSize={12} axisLine={false} tickLine={false} stroke="#ADB5BD" />
-                    <Tooltip 
-                      labelFormatter={(val) => `時刻: ${formatTime(val)}`}
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }} 
-                    />
-                    <Legend iconType="circle" verticalAlign="top" align="right" height={50} />
-                    {renderLineContent()}
-                  </LineChart>
-                </ResponsiveContainer>
-              </>
             )}
           </div>
 
-          <div className="col-span-4 space-y-4 overflow-y-auto pr-2">
+          <div className="col-span-4 h-[50vh] overflow-y-auto pr-2">
             {counts.map((count: number, i: number) => (
-              <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow">
+              <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow mb-3">
                 <div>
                   <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">{prizeLabels[i] || `${i + 1}等`}</p>
                   <p className="text-3xl font-black text-gray-900">{count}</p>
@@ -231,6 +473,42 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          <div className="col-span-12">
+            <div className="bg-white p-5 rounded-2xl border border-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-700">メモ</h3>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold text-gray-500">コメントを追加</p>
+                <select
+                  value={memoPointPrizeIndex}
+                  onChange={(e) => setMemoPointPrizeIndex(Number(e.target.value))}
+                  className="w-full p-2 rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                >
+                  {counts.map((_, i) => (
+                    <option key={`memo-target-${i}`} value={i}>
+                      {prizeLabels[i] || `${i + 1}等`} / 在庫 {counts[i] ?? 0}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  value={memoPointInput}
+                  onChange={(e) => setMemoPointInput(e.target.value)}
+                  placeholder="ここにコメントを入力"
+                  className="w-full h-20 p-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300 resize-none"
+                />
+                <button
+                  onClick={handleAddMemoPointFromPanel}
+                  disabled={isSavingMemoPoint}
+                  className="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isSavingMemoPoint ? "記録中..." : "コメントを記録"}
+                </button>
+              </div>
+            </div>
+          </div>
         </main>
       </div>
 
@@ -238,6 +516,7 @@ export default function Home() {
       <div className="md:hidden flex flex-col h-screen overflow-y-auto bg-white">
         <div className="flex-1 p-5 flex flex-col">
           <div className="flex justify-between items-center mb-6">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/favicon.ico" alt="icon" className="w-10 h-10" />
             <h1 className="text-[12px] font-black text-gray-900 tracking-[0.3em] uppercase">Count kun</h1>
             <div className="flex gap-2">
@@ -264,33 +543,36 @@ export default function Home() {
             </div>
           </div>
           
-          <div className="flex-1 min-h-[300px] w-full bg-gray-50 rounded-[40px] p-5 shadow-inner border border-gray-100">
-            {history.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-gray-400">
-                <div className="text-center text-[12px]">
-                  <p className="font-semibold mb-1">グラフデータなし</p>
-                  <p className="text-[10px] text-gray-300">DRAW モードでカウント記録へ</p>
-                </div>
+          <div className="flex-1 min-h-[300px] w-full bg-gray-50 rounded-[40px] p-5 shadow-inner border border-gray-100 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E9ECEF" />
+                <XAxis 
+                  dataKey="timestamp" 
+                  type="number" 
+                  domain={[
+                    `dataMin - ${xAxisPaddingMs}`,
+                    `dataMax + ${xAxisPaddingMs}`,
+                  ]} 
+                  tickFormatter={formatTime}
+                  fontSize={10}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis fontSize={10} axisLine={false} tickLine={false} />
+                <Tooltip 
+                  content={renderTooltipContent}
+                />
+                {renderLineContent()}
+              </LineChart>
+            </ResponsiveContainer>
+            {history.length === 0 && (
+              <div className="absolute left-5 top-5 rounded-md bg-white/90 px-2 py-1 border border-gray-100 text-[10px] text-gray-500">
+                現在在庫を表示中
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={history} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E9ECEF" />
-                  <XAxis 
-                    dataKey="timestamp" 
-                    type="number" 
-                    domain={['dataMin', 'dataMax']} 
-                    tickFormatter={formatTime}
-                    fontSize={10}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis fontSize={10} axisLine={false} tickLine={false} />
-                  {renderLineContent()}
-                </LineChart>
-              </ResponsiveContainer>
             )}
           </div>
+          <p className="text-[10px] text-gray-500 mt-3 text-center">コメントはグラフ上の点とツールチップに表示されます</p>
         </div>
 
         {/* 携帯版 下部ナビゲーション兼操作パネル */}
@@ -312,14 +594,62 @@ export default function Home() {
               </button>
             ))}
           </div>
+
+          <div className="mb-4 rounded-2xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+            <p className="text-[11px] font-semibold text-gray-600">メモ</p>
+            <select
+              value={memoPointPrizeIndex}
+              onChange={(e) => setMemoPointPrizeIndex(Number(e.target.value))}
+              className="w-full p-2 rounded-lg border border-gray-200 bg-white text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300"
+            >
+              {counts.map((_, i) => (
+                <option key={`memo-target-mobile-${i}`} value={i}>
+                  {prizeLabels[i] || `${i + 1}等`} / 在庫 {counts[i] ?? 0}
+                </option>
+              ))}
+            </select>
+            <textarea
+              value={memoPointInput}
+              onChange={(e) => setMemoPointInput(e.target.value)}
+              placeholder="ここにコメントを入力"
+              className="w-full h-20 p-3 rounded-lg border border-gray-200 bg-white text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300 resize-none"
+            />
+            <button
+              onClick={handleAddMemoPointFromPanel}
+              disabled={isSavingMemoPoint}
+              className="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
+            >
+              {isSavingMemoPoint ? "記録中..." : "コメントを記録"}
+            </button>
+          </div>
           
           <div className="flex gap-3 mb-3">
+            <button 
+              onClick={() => {
+                endMeasurement();
+                if (typeof window !== "undefined") {
+                  sessionStorage.setItem("measurementEndedLockBack", "1");
+                }
+                router.replace("/results");
+              }}
+              disabled={!measuring}
+              className={`flex-1 py-3 font-black rounded-xl transition-all active:scale-[0.98] text-sm ${
+                measuring
+                  ? "bg-red-500 text-white"
+                  : "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed opacity-50"
+              }`}
+            >
+              ⏹️ 計測終了
+            </button>
             <button 
               onClick={() => router.push("/select-dataset")}
               className="flex-1 py-3 bg-indigo-600 text-white font-black rounded-xl transition-all active:scale-[0.98] text-sm"
             >
               📊 データセット変更
             </button>
+          </div>
+
+          <div className="flex gap-3 mb-3">
             {isAdmin && (
               <button 
                 onClick={() => router.push("/admin")}

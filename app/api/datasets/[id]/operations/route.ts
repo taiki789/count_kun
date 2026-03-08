@@ -14,7 +14,7 @@ function getAdminDB() {
       let parsedKey;
       try {
         parsedKey = JSON.parse(key);
-      } catch (parseError) {
+      } catch {
         throw new Error(`FIREBASE_ADMIN_SDK_KEY is not valid JSON`);
       }
       initializeApp({
@@ -28,7 +28,7 @@ function getAdminDB() {
   return getFirestore();
 }
 
-// PATCH: データセット操作（addHistory, resetData, setCounts）
+// PATCH: データセット操作（addHistory, addMemoPoint, resetData, setCounts, addMemo）
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -36,7 +36,7 @@ export async function PATCH(
   try {
     const adminDb = getAdminDB();
     const body = await request.json();
-    const { action, counts, entry } = body;
+    const { action, counts, entry, timestamp, memo } = body;
     
     const resolvedParams = await params;
     const datasetId = resolvedParams.id;
@@ -79,6 +79,21 @@ export async function PATCH(
       return NextResponse.json({ message: "Update Success" });
     }
 
+    if (action === 'addMemoPoint') {
+      const nextCounts = Array.isArray(counts) ? counts : [];
+      const historyEntry = entry as Record<string, unknown> | undefined;
+      if (!historyEntry || typeof historyEntry !== 'object') {
+        return NextResponse.json({ error: "Invalid entry" }, { status: 400 });
+      }
+
+      await docRef.update({
+        counts: nextCounts,
+        history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return NextResponse.json({ message: "Memo Point Added Success", updated: true });
+    }
+
     if (action === 'setCounts') {
       // カウント値を設定、ヒストリをクリア
       await docRef.update({
@@ -90,11 +105,44 @@ export async function PATCH(
       return NextResponse.json({ message: "Counts Set Success" });
     }
 
+    if (action === 'addMemo') {
+      // timestamp指定の履歴エントリにメモを保存
+      const targetTimestamp = Number(timestamp);
+      if (!Number.isFinite(targetTimestamp)) {
+        return NextResponse.json({ error: "Invalid timestamp" }, { status: 400 });
+      }
+
+      const memoText = typeof memo === 'string' ? memo : '';
+      const snapshot = await docRef.get();
+      const currentHistory = (snapshot.data()?.history as Record<string, unknown>[] | undefined) || [];
+
+      let updated = false;
+      const updatedHistory = currentHistory.map((entry: Record<string, unknown>) => {
+        const entryTimestamp = Number(entry?.timestamp);
+        if (Number.isFinite(entryTimestamp) && entryTimestamp === targetTimestamp) {
+          updated = true;
+          return { ...entry, memo: memoText };
+        }
+        return entry;
+      });
+
+      if (!updated) {
+        return NextResponse.json({ error: "History entry not found" }, { status: 404 });
+      }
+
+      await docRef.update({
+        history: updatedHistory,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return NextResponse.json({ message: "Memo Added Success", updated: true });
+    }
+
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
-  } catch (error: any) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    const errorMessage = err.message;
+    const errorStack = err.stack;
     console.error("Dataset operation error:", errorMessage);
     if (errorStack) console.error("Stack:", errorStack);
     
@@ -102,7 +150,7 @@ export async function PATCH(
       error: errorMessage,
       type: error?.constructor?.name || 'Unknown',
       timestamp: new Date().toISOString(),
-      details: error?.details || null
+      details: null
     }, { status: 500 });
   }
 }

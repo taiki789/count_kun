@@ -9,10 +9,12 @@ import Link from "next/link";
 
 function CounterForm({ isMobile }: { isMobile: boolean }) {
   const router = useRouter();
-  const { counts, prizeLabels, resetContext, currentDatasetId, startMeasurement } = useContext(PrizeContext);
+  const { counts, prizeLabels, resetContext, currentDatasetId, startMeasurement, datasets } = useContext(PrizeContext);
   const [numbers, setNumbers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [initializedDatasetId, setInitializedDatasetId] = useState<string | null>(null);
+
+  const currentDataset = datasets.find(d => d.id === currentDatasetId);
 
   // 初回表示時、またはデータセット切替時のみ入力欄を初期化
   useEffect(() => {
@@ -62,9 +64,21 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {currentDataset && (
+        <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-4">
+          <p className="text-xs font-bold text-indigo-600 mb-1">選択中のデータセット</p>
+          <p className="text-lg font-black text-indigo-900">{currentDataset.name}</p>
+        </div>
+      )}
       {numbers.length === 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-          データセットを選択してから設定してください。
+          <p className="mb-3">データセットを選択してから設定してください。</p>
+          <Link 
+            href="/select-dataset"
+            className="inline-block bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors"
+          >
+            データセットを選択
+          </Link>
         </div>
       )}
       <div className={isMobile ? "space-y-4" : numbers.length <= 5 ? "flex gap-4 bg-gray-50 p-6 rounded-3xl" : "grid grid-cols-5 gap-4 bg-gray-50 p-6 rounded-3xl"}>
@@ -81,13 +95,13 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
         <button
         type="submit"
         disabled={loading || numbers.length === 0}
-        className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50`}
+        className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50 ${isMobile ? "text-sm" : ""}`}
         >
-          {loading ? "SAVING..." : "在庫を確定"}
+          {loading ? "処理中..." : "在庫を確定して計測開始"}
         </button>
       </div>
       <div className="text-center text-sm text-gray-400">
-       <p>在庫確定後は自動でホーム画面へ移動します</p>
+       <p>確定後、自動で計測が開始されホーム画面へ移動します</p>
       </div>
     </form>
   );
@@ -120,9 +134,9 @@ export default function SettingsPage() {
       <div className="hidden md:block max-w-6xl mx-auto p-10">
         <header className="mb-10 flex justify-between items-end">
           <div>
-            <h1 className="text-4xl font-black text-gray-900">Inventory Setup</h1>
+            <h1 className="text-4xl font-black text-gray-900">在庫設定</h1>
             <p className="text-gray-400 font-medium border-l-4 border-blue-500 pl-4 mt-2">
-              景品の初期在庫を設定してください
+              景品の初期在庫を設定して計測を開始してください
             </p>
           </div>
           <div className="flex gap-4">
@@ -147,7 +161,7 @@ export default function SettingsPage() {
         <header className="mb-8 flex justify-between items-start">
           <div>
             <h1 className="text-2xl font-black text-gray-900">在庫設定</h1>
-            <p className="text-sm text-gray-400">各等の数を入力してください</p>
+            <p className="text-sm text-gray-500">各等の数を入力して計測開始</p>
           </div>
           <button 
             onClick={handleLogout}

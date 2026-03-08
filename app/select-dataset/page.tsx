@@ -27,12 +27,13 @@ export default function SelectDataset() {
 
   useEffect(() => {
     fetchDatasets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectDataset = async (datasetId: string) => {
     try {
       await selectDataset(datasetId);
-      router.push("/home");
+      router.push("/settings");
     } catch (error) {
       console.error("Select dataset error:", error);
       alert("データセットの選択に失敗しました");

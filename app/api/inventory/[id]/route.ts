@@ -28,10 +28,7 @@ function getAdminDB() {
   return getFirestore();
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET() {
   // GETリクエスト（ブラウザで直接開いた時）の確認用
   return NextResponse.json({ message: "API Path is correct!" });
 }
@@ -81,14 +78,15 @@ export async function PATCH(
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
+    const errorType = error instanceof Error ? error.constructor.name : typeof error;
     console.error("Admin SDK Runtime Error:", errorMessage);
     if (errorStack) console.error("Stack:", errorStack);
     return NextResponse.json({ 
       error: errorMessage,
-      type: error?.constructor?.name || 'Unknown',
+      type: errorType || 'Unknown',
       timestamp: new Date().toISOString()
     }, { status: 500 });
   }

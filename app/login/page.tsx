@@ -36,8 +36,9 @@ export default function LoginPage() {
       }
       setEmail("");
       setPassword("");
-    } catch (err: any) {
-      setError(err.message || "認証に失敗しました");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "認証に失敗しました";
+      setError(message);
     } finally {
       setLoading(false);
     }

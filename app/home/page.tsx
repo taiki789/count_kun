@@ -12,12 +12,40 @@ import {
 
 export default function Home() {
   const router = useRouter();
-  const { counts, history, prizeLabels, addHistory, addMemoPoint, resetData, loading, measuring, endMeasurement } = useContext(PrizeContext);
+  const {
+    counts,
+    history,
+    initialCounts,
+    prices,
+    mode,
+    accountingHistory,
+    prizeLabels,
+    addHistory,
+    addMemoPoint,
+    completeAccountingTransaction,
+    undoLastAction,
+    resetData,
+    loading,
+    measuring,
+    endMeasurement,
+  } = useContext(PrizeContext);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [memoPointInput, setMemoPointInput] = useState("");
   const [memoPointPrizeIndex, setMemoPointPrizeIndex] = useState(0);
   const [isSavingMemoPoint, setIsSavingMemoPoint] = useState(false);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [chartView, setChartView] = useState<"inventory" | "sales">("inventory");
+  const [paymentInput, setPaymentInput] = useState("");
+  const [, setCalculatorExpression] = useState("");
+  const [cartQuantities, setCartQuantities] = useState<number[]>([]);
+  const [cartActionStack, setCartActionStack] = useState<number[]>([]);
+  const [lastAccountingResult, setLastAccountingResult] = useState<{
+    summary: string;
+    paid: number;
+    total: number;
+    change: number;
+  } | null>(null);
   const [inAppNotification, setInAppNotification] = useState<{ title: string; body: string } | null>(null);
   const notificationRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const inAppNotificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -37,6 +65,89 @@ export default function Home() {
   const baseColors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#f43f5e", "#06b6d4", "#10b981", "#6366f1", "#a855f7", "#14b8a6", "#f59e0b", "#84cc16", "#64748b", "#dc2626", "#7c3aed", "#db2777", "#0ea5e9"];
   const colors = counts.map((_, i) => baseColors[i % baseColors.length]);
   const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
+  const isAccountingMode = mode === "accounting";
+
+  const evaluateExpression = (expression: string) => {
+    const sanitized = expression.replace(/\s+/g, "").replace(/[xX×]/g, "*").replace(/÷/g, "/");
+    if (!sanitized) return null;
+    if (!/^[0-9+\-*/().]+$/.test(sanitized)) return null;
+
+    const tokens = sanitized.match(/\d+(?:\.\d+)?|[()+\-*/]/g);
+    if (!tokens || tokens.join("") !== sanitized) return null;
+
+    const precedence: Record<string, number> = {
+      "+": 1,
+      "-": 1,
+      "*": 2,
+      "/": 2,
+    };
+
+    const output: string[] = [];
+    const ops: string[] = [];
+
+    tokens.forEach((token) => {
+      if (/^\d/.test(token)) {
+        output.push(token);
+        return;
+      }
+
+      if (token === "(") {
+        ops.push(token);
+        return;
+      }
+
+      if (token === ")") {
+        while (ops.length > 0 && ops[ops.length - 1] !== "(") {
+          const operator = ops.pop();
+          if (operator) output.push(operator);
+        }
+        if (ops[ops.length - 1] === "(") ops.pop();
+        return;
+      }
+
+      while (
+        ops.length > 0 &&
+        ops[ops.length - 1] !== "(" &&
+        precedence[ops[ops.length - 1]] >= precedence[token]
+      ) {
+        const operator = ops.pop();
+        if (operator) output.push(operator);
+      }
+      ops.push(token);
+    });
+
+    while (ops.length > 0) {
+      const operator = ops.pop();
+      if (!operator || operator === "(") return null;
+      output.push(operator);
+    }
+
+    const stack: number[] = [];
+    for (const token of output) {
+      if (/^\d/.test(token)) {
+        stack.push(Number(token));
+        continue;
+      }
+
+      const right = stack.pop();
+      const left = stack.pop();
+      if (typeof left !== "number" || typeof right !== "number") return null;
+
+      let result = 0;
+      if (token === "+") result = left + right;
+      if (token === "-") result = left - right;
+      if (token === "*") result = left * right;
+      if (token === "/") {
+        if (right === 0) return null;
+        result = left / right;
+      }
+      stack.push(result);
+    }
+
+    if (stack.length !== 1) return null;
+    const fixed = Number(stack[0].toFixed(2));
+    return Number.isFinite(fixed) ? fixed : null;
+  };
 
   const canUseBrowserNotifications = useCallback(() => {
     if (typeof window === "undefined") return false;
@@ -258,6 +369,21 @@ export default function Home() {
     }
   }, [counts.length, memoPointPrizeIndex]);
 
+  useEffect(() => {
+    setCartQuantities((prev) => Array.from({ length: counts.length }, (_, index) => prev[index] || 0));
+  }, [counts.length]);
+
+  useEffect(() => {
+    if (!isAccountingMode) {
+      setChartView("inventory");
+      setPaymentInput("");
+      setCalculatorExpression("");
+      setLastAccountingResult(null);
+      setCartQuantities(Array(counts.length).fill(0));
+      setCartActionStack([]);
+    }
+  }, [isAccountingMode, counts.length]);
+
   // 時間フォーマット関数 (Unixタイムスタンプを HH:mm 形式へ)
   const formatTime = (tick: number | string) => {
     if (!tick) return "";
@@ -265,8 +391,88 @@ export default function Home() {
     return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
   };
 
+  const handleCalculatorPress = (value: string) => {
+    const syncPaymentFromExpression = (expression: string) => {
+      const evaluated = evaluateExpression(expression);
+      if (evaluated !== null && evaluated >= 0) {
+        setPaymentInput(String(evaluated));
+        return;
+      }
+
+      const normalized = expression.replace(/\s+/g, "");
+      if (/^\d*\.?\d*$/.test(normalized)) {
+        setPaymentInput(normalized);
+      }
+    };
+
+    if (value === "C") {
+      setCalculatorExpression("");
+      setPaymentInput("");
+      return;
+    }
+
+    if (value === "⌫") {
+      setCalculatorExpression((prev) => {
+        const next = prev.slice(0, -1);
+        syncPaymentFromExpression(next);
+        return next;
+      });
+      return;
+    }
+
+    if (value === "会計") {
+      void handleCompleteAccounting();
+      return;
+    }
+
+    setCalculatorExpression((prev) => {
+      const next = `${prev}${value}`;
+      syncPaymentFromExpression(next);
+      return next;
+    });
+  };
+
+  const handleUndo = async () => {
+    setIsUndoing(true);
+    try {
+      if (isAccountingMode && cartActionStack.length > 0) {
+        const lastIndex = cartActionStack[cartActionStack.length - 1];
+        setCartActionStack((prev) => prev.slice(0, -1));
+        setCartQuantities((prev) => prev.map((value, index) => {
+          if (index !== lastIndex) return value;
+          return Math.max(0, value - 1);
+        }));
+        setLastAccountingResult(null);
+        return;
+      }
+
+      await undoLastAction();
+      if (isAccountingMode) {
+        setLastAccountingResult(null);
+      }
+    } catch (error) {
+      console.error("Undo失敗:", error);
+      alert("一つ前に戻せませんでした");
+    } finally {
+      setIsUndoing(false);
+    }
+  };
+
   const handleDraw = async (index: number) => {
     if (counts[index] <= 0) return;
+
+    if (isAccountingMode) {
+      const selectedCount = cartQuantities[index] ?? 0;
+      if (selectedCount >= counts[index]) {
+        alert("この景品はこれ以上追加できません");
+        return;
+      }
+
+      setCartQuantities((prev) => prev.map((value, currentIndex) => currentIndex === index ? value + 1 : value));
+      setCartActionStack((prev) => [...prev, index]);
+      setLastAccountingResult(null);
+      return;
+    }
     
     const newCounts = [...counts];
     newCounts[index] -= 1;
@@ -275,6 +481,69 @@ export default function Home() {
       await addHistory(newCounts);
     } catch (error) {
       console.error("更新失敗:", error);
+    }
+  };
+
+  const handleCompleteAccounting = async () => {
+    const totalAmount = cartQuantities.reduce((sum, quantity, index) => sum + quantity * Number(prices[index] ?? 0), 0);
+    if (totalAmount <= 0) {
+      alert("DRAWした商品がありません");
+      return;
+    }
+
+    const receivedAmount = Number(paymentInput);
+    if (!Number.isFinite(receivedAmount) || paymentInput.trim() === "") {
+      alert("お受け取り金額を入力してください");
+      return;
+    }
+    if (receivedAmount < totalAmount) {
+      alert("お受け取り金額が不足しています");
+      return;
+    }
+
+    const soldItems = cartQuantities
+      .map((quantity, index) => ({ quantity, index }))
+      .filter((item) => item.quantity > 0)
+      .map((item) => {
+        const unitPrice = Number(prices[item.index] ?? 0);
+        return {
+          prizeIndex: item.index,
+          label: prizeLabels[item.index] || `${item.index + 1}等`,
+          unitPrice,
+          quantity: item.quantity,
+          subtotal: unitPrice * item.quantity,
+        };
+      });
+
+    const newCounts = counts.map((count, index) => count - (cartQuantities[index] ?? 0));
+    const now = new Date();
+    const timestamp = Date.now();
+    const record = {
+      id: `${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp,
+      time: `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
+      totalAmount,
+      receivedAmount,
+      change: receivedAmount - totalAmount,
+      historyTimestamp: timestamp,
+      items: soldItems,
+    };
+
+    try {
+      await completeAccountingTransaction({ newCounts, record });
+      setLastAccountingResult({
+        summary: soldItems.map((item) => `${item.label}×${item.quantity}`).join(" / "),
+        paid: receivedAmount,
+        total: totalAmount,
+        change: receivedAmount - totalAmount,
+      });
+      setCartQuantities(Array(counts.length).fill(0));
+      setCartActionStack([]);
+      setPaymentInput("");
+      setCalculatorExpression("");
+    } catch (error) {
+      console.error("会計失敗:", error);
+      alert("会計処理に失敗しました");
     }
   };
 
@@ -396,11 +665,12 @@ export default function Home() {
     );
   };
 
-  const renderLineContent = () => counts.map((_, i) => (
+  const renderInventoryLineContent = () => counts.map((_, i) => (
     <Line
       key={i + 1}
       type="monotone" // 点と点を滑らかにつなぐ
       dataKey={`p${i + 1}`}
+      name={prizeLabels[i] || `${i + 1}等`}
       stroke={colors[i]}
       strokeWidth={3}
       dot={renderChangedOnlyDot(i, colors[i])}
@@ -410,7 +680,22 @@ export default function Home() {
     />
   ));
 
-  const buildSnapshotEntry = (timestamp: number) =>
+  const renderSalesLineContent = () => counts.map((_, i) => (
+    <Line
+      key={`sales-${i + 1}`}
+      type="monotone"
+      dataKey={`s${i + 1}`}
+      name={prizeLabels[i] || `${i + 1}等`}
+      stroke={colors[i]}
+      strokeWidth={3}
+      dot={{ r: 3 }}
+      activeDot={{ r: 6, strokeWidth: 0 }}
+      animationDuration={1000}
+      connectNulls={true}
+    />
+  ));
+
+  const buildInventorySnapshotEntry = (timestamp: number) =>
     counts.reduce<Record<string, number | string | boolean>>(
       (acc, count, index) => {
         acc[`p${index + 1}`] = count;
@@ -423,10 +708,25 @@ export default function Home() {
       }
     );
 
+  const buildSalesSnapshotEntry = (timestamp: number) =>
+    counts.reduce<Record<string, number | string | boolean>>(
+      (acc, _, index) => {
+        const initial = Number(initialCounts[index] ?? 0);
+        const current = Number(counts[index] ?? 0);
+        acc[`s${index + 1}`] = Math.max(0, initial - current);
+        acc[`changedS${index + 1}`] = false;
+        return acc;
+      },
+      {
+        timestamp,
+        time: "--:--",
+      }
+    );
+
   const chartData = (() => {
     if (history.length === 0) {
       const now = Date.now();
-      return [buildSnapshotEntry(now - 60_000), buildSnapshotEntry(now)];
+      return [buildInventorySnapshotEntry(now - 60_000), buildInventorySnapshotEntry(now)];
     }
 
     if (history.length === 1) {
@@ -440,7 +740,63 @@ export default function Home() {
     return history;
   })();
 
+  const salesChartData = (() => {
+    if (history.length === 0) {
+      const now = Date.now();
+      return [buildSalesSnapshotEntry(now - 60_000), buildSalesSnapshotEntry(now)];
+    }
+
+    const converted = history.map((entry) => {
+      const source = entry as Record<string, unknown>;
+      const row: Record<string, number | string | boolean | undefined> = {
+        timestamp: typeof source.timestamp === "number" ? source.timestamp : Date.now(),
+        time: typeof source.time === "string" ? source.time : "--:--",
+        memo: typeof source.memo === "string" ? source.memo : undefined,
+        memoPrizeIndex: typeof source.memoPrizeIndex === "number" ? source.memoPrizeIndex : undefined,
+      };
+
+      counts.forEach((_, index) => {
+        const initial = Number(initialCounts[index] ?? 0);
+        const currentRaw = Number(source[`p${index + 1}`]);
+        const current = Number.isFinite(currentRaw) ? currentRaw : Number(counts[index] ?? 0);
+        row[`s${index + 1}`] = Math.max(0, initial - current);
+        row[`changedS${index + 1}`] = source[`changedP${index + 1}`] === true;
+      });
+
+      return row;
+    });
+
+    if (converted.length === 1) {
+      const only = converted[0];
+      const ts = Number(only.timestamp);
+      const safeTs = Number.isFinite(ts) ? ts : Date.now();
+      return [{ ...only, timestamp: safeTs - 60_000, time: "--:--" }, only];
+    }
+
+    return converted;
+  })();
+
+  const activeChartData = isAccountingMode && chartView === "sales" ? salesChartData : chartData;
+  const chartEmpty = history.length === 0;
+
   const xAxisPaddingMs = 2 * 60 * 1000;
+  const calculatorButtons = ["7", "8", "9", "÷", "4", "5", "6", "×", "1", "2", "3", "-", "0", ".", "(", ")", "C", "⌫", "+", "会計"];
+  const totalSelectedItems = cartQuantities.reduce((sum, quantity) => sum + quantity, 0);
+  const accountingTotalAmount = cartQuantities.reduce(
+    (sum, quantity, index) => sum + quantity * Number(prices[index] ?? 0),
+    0,
+  );
+  const accountingDenseLevel = counts.length >= 17 ? 3 : counts.length >= 13 ? 2 : counts.length >= 9 ? 1 : 0;
+  const accountingLeftSpanClass = accountingDenseLevel >= 2 ? "col-span-4" : "col-span-5";
+  const accountingRightSpanClass = accountingDenseLevel >= 2 ? "col-span-8" : "col-span-7";
+  const accountingGridColsClass = accountingDenseLevel === 0
+    ? "grid-cols-3"
+    : accountingDenseLevel === 1
+      ? "grid-cols-4"
+      : accountingDenseLevel === 2
+        ? "grid-cols-5"
+        : "grid-cols-6";
+  const isUltraDenseAccounting = accountingDenseLevel >= 2;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] pb-24 md:pb-0 font-sans">
@@ -453,15 +809,23 @@ export default function Home() {
       
       {/* --- PC版 --- */}
       <div className="hidden md:flex flex-col h-screen">
-        <header className="bg-white border-b px-10 py-5 flex justify-between items-center shadow-sm">
+        <header className={`bg-white border-b px-4 lg:px-10 ${isAccountingMode ? "py-2 lg:py-3" : "py-4 lg:py-5"} flex flex-wrap justify-between items-center gap-2 lg:gap-3 shadow-sm`}>
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push("/select-dataset")}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/favicon.ico" alt="icon" className="w-10 h-10" />
-              <h1 className="text-2xl font-black text-gray-900 tracking-tighter">Count kun</h1>
+              <h1 className={`${isAccountingMode ? "text-xl lg:text-2xl" : "text-2xl"} font-black text-gray-900 tracking-tighter`}>Count kun</h1>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 lg:gap-3 flex-wrap justify-end">
+            {isAccountingMode && (
+              <button
+                onClick={() => router.push("/home/analytics")}
+                className="text-[10px] font-black text-emerald-600 hover:text-emerald-700 border border-emerald-200 px-5 py-2 rounded-full transition-all tracking-widest"
+              >
+                📈 グラフ・コメント
+              </button>
+            )}
             <button 
               onClick={() => router.push("/select-dataset")}
               className="text-[10px] font-black text-gray-400 hover:text-indigo-500 border border-gray-200 px-5 py-2 rounded-full transition-all tracking-widest"
@@ -488,6 +852,17 @@ export default function Home() {
               }`}
             >
               ⏹️ 計測終了
+            </button>
+            <button
+              onClick={handleUndo}
+              disabled={isUndoing || history.length === 0}
+              className={`text-[10px] font-black px-5 py-2 rounded-full transition-all tracking-widest border ${
+                isUndoing || history.length === 0
+                  ? "text-gray-300 border-gray-200 bg-gray-50 cursor-not-allowed"
+                  : "text-amber-600 border-amber-200 hover:bg-amber-50"
+              }`}
+            >
+              ↩ ひとつ戻す
             </button>
             {isAdmin && (
               <button 
@@ -516,58 +891,179 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-10 grid grid-cols-12 gap-6 auto-rows-min">
+        <main className={isAccountingMode ? "flex-1 overflow-hidden p-2 lg:p-3 grid grid-cols-12 gap-2 lg:gap-3" : "flex-1 overflow-y-auto p-6 lg:p-10 grid grid-cols-12 gap-6 auto-rows-min"}>
+          {!isAccountingMode && (
           <div className="col-span-8 h-[50vh] bg-white p-8 rounded-[32px] shadow-xl shadow-gray-200/50 border border-gray-100 relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
-                <XAxis 
-                  dataKey="timestamp" // UnixTimeを使用
-                  type="number"       // これにより時間幅が可変になる
-                  domain={[
-                    `dataMin - ${xAxisPaddingMs}`,
-                    `dataMax + ${xAxisPaddingMs}`,
-                  ]} 
-                  tickFormatter={formatTime}
-                  fontSize={12}
-                  tickMargin={15}
-                  axisLine={false}
-                  tickLine={false}
-                  stroke="#ADB5BD"
-                />
-                <YAxis fontSize={12} axisLine={false} tickLine={false} stroke="#ADB5BD" />
-                <Tooltip 
-                  content={renderTooltipContent}
-                />
-                <Legend iconType="circle" verticalAlign="top" align="right" height={50} />
-                {renderLineContent()}
-              </LineChart>
-            </ResponsiveContainer>
-            {history.length === 0 && (
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-black text-gray-600">
+                {isAccountingMode && chartView === "sales" ? "売上数推移" : "在庫推移"}
+              </p>
+              {isAccountingMode && (
+                <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 p-1">
+                  <button
+                    onClick={() => setChartView("inventory")}
+                    className={`text-xs font-black px-3 py-1 rounded-full transition-colors ${
+                      chartView === "inventory" ? "bg-white text-gray-900 shadow" : "text-gray-500"
+                    }`}
+                  >
+                    在庫
+                  </button>
+                  <button
+                    onClick={() => setChartView("sales")}
+                    className={`text-xs font-black px-3 py-1 rounded-full transition-colors ${
+                      chartView === "sales" ? "bg-white text-gray-900 shadow" : "text-gray-500"
+                    }`}
+                  >
+                    売上数
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="h-[calc(100%-2.5rem)]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={activeChartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
+                  <XAxis
+                    dataKey="timestamp"
+                    type="number"
+                    domain={[
+                      `dataMin - ${xAxisPaddingMs}`,
+                      `dataMax + ${xAxisPaddingMs}`,
+                    ]}
+                    tickFormatter={formatTime}
+                    fontSize={12}
+                    tickMargin={15}
+                    axisLine={false}
+                    tickLine={false}
+                    stroke="#ADB5BD"
+                  />
+                  <YAxis fontSize={12} axisLine={false} tickLine={false} stroke="#ADB5BD" />
+                  <Tooltip
+                    content={renderTooltipContent}
+                  />
+                  <Legend iconType="circle" verticalAlign="top" align="right" height={50} />
+                  {isAccountingMode && chartView === "sales" ? renderSalesLineContent() : renderInventoryLineContent()}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            {chartEmpty && (
               <div className="absolute left-8 top-8 rounded-lg bg-white/90 px-3 py-2 border border-gray-100 text-xs text-gray-500">
                 グラフデータなし（現在在庫を表示中）
               </div>
             )}
           </div>
+          )}
 
-          <div className="col-span-4 h-[50vh] overflow-y-auto pr-2">
-            {counts.map((count: number, i: number) => (
-              <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow mb-3">
-                <div>
-                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">{prizeLabels[i] || `${i + 1}等`}</p>
-                  <p className="text-3xl font-black text-gray-900">{count}</p>
+          {isAccountingMode ? (
+            <>
+              <div className={`${accountingLeftSpanClass} h-full`}>
+                <div className="bg-white p-3 lg:p-4 rounded-3xl border border-emerald-100 h-full flex flex-col shadow-xl shadow-emerald-100/30 overflow-hidden">
+                  <p className="text-xs lg:text-sm font-black text-emerald-600 mb-2">会計モード</p>
+                  <label className="text-xs font-bold text-gray-500">お支払い金額合計 (円)</label>
+                  <div className="w-full mt-1 mb-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xl lg:text-2xl font-black text-gray-900">
+                    ¥{accountingTotalAmount.toLocaleString("ja-JP")}
+                  </div>
+                  <p className="text-[10px] text-gray-500 mb-2">選択商品数: {totalSelectedItems}</p>
+                  <label className="text-xs font-bold text-gray-500">お受け取り金額 (円)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={paymentInput}
+                    onChange={(e) => setPaymentInput(e.target.value)}
+                    className="w-full mt-1 mb-2 rounded-xl border border-gray-200 px-3 py-2 text-base lg:text-lg font-black text-gray-900"
+                    placeholder="例: 1000"
+                  />
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 mb-2">
+                    <p className="text-xs text-emerald-700 font-bold mb-1">会計結果</p>
+                    <p className="text-xl lg:text-2xl text-emerald-700 font-black mt-1">
+                      {lastAccountingResult ? `¥${lastAccountingResult.change.toLocaleString("ja-JP")}` : "¥0"}
+                    </p>
+                    <p className="text-[10px] text-emerald-800 mt-1 min-h-[12px] line-clamp-2">
+                      {lastAccountingResult ? `${lastAccountingResult.summary} / 受取 ¥${lastAccountingResult.paid.toLocaleString("ja-JP")}` : "会計ボタンを押すとおつりを表示します"}
+                    </p>
+                  </div>
+                  <div className={`grid flex-1 grid-cols-4 ${isUltraDenseAccounting ? "gap-1" : "gap-1.5"} content-start auto-rows-fr min-h-[0]`}>
+                    {calculatorButtons.map((key) => (
+                      <button
+                        key={`calc-desktop-${key}`}
+                        onClick={() => handleCalculatorPress(key === "×" ? "*" : key === "÷" ? "/" : key)}
+                        className={`font-black rounded-lg border transition-colors ${isUltraDenseAccounting ? "text-[10px] lg:text-xs py-1.5 lg:py-2" : "text-xs lg:text-sm py-2 lg:py-2.5"} ${
+                          key === "会計" ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        {key}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => { void handleUndo(); }}
+                      disabled={isUndoing || (cartActionStack.length === 0 && history.length === 0)}
+                      className="w-full rounded-xl bg-amber-500 text-white font-black py-2.5 disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      ↩ ひとつ戻す
+                    </button>
+                    <button
+                      onClick={() => router.push("/home/accounting-history")}
+                      disabled={accountingHistory.length === 0}
+                      className="w-full rounded-xl border border-emerald-200 text-emerald-700 font-black py-2.5 disabled:text-gray-300 disabled:border-gray-200"
+                    >
+                      会計履歴を見る
+                    </button>
+                  </div>
                 </div>
-                <button 
-                  onClick={() => handleDraw(i)}
-                  disabled={count === 0}
-                  className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold disabled:opacity-10 active:scale-95 transition-all"
-                >
-                  DRAW
-                </button>
               </div>
-            ))}
-          </div>
 
+              <div className={`${accountingRightSpanClass} h-full overflow-hidden`}>
+                <div className={`grid ${accountingGridColsClass} gap-1.5 lg:gap-2 h-full auto-rows-fr`}>
+                  {counts.map((count: number, i: number) => {
+                    const selectedQuantity = cartQuantities[i] ?? 0;
+                    const remainingSelectable = Math.max(0, count - selectedQuantity);
+
+                    return (
+                      <div key={i} className={`${isUltraDenseAccounting ? "p-1.5 lg:p-2" : "p-2.5 lg:p-3"} rounded-2xl border flex flex-col justify-between transition-shadow ${selectedQuantity > 0 ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-100"}`}>
+                        <div>
+                          <p className={`${isUltraDenseAccounting ? "text-[9px]" : "text-[10px]"} font-black text-gray-500 truncate`}>{prizeLabels[i] || `${i + 1}等`}</p>
+                          <p className={`${isUltraDenseAccounting ? "text-lg lg:text-xl" : "text-2xl lg:text-3xl"} font-black text-gray-900 leading-none mt-1`}>{count}</p>
+                          <p className={`${isUltraDenseAccounting ? "text-[9px]" : "text-[10px]"} font-bold text-emerald-600 mt-1`}>¥{Number(prices[i] ?? 0).toLocaleString("ja-JP")}</p>
+                          {accountingDenseLevel <= 1 && (
+                            <p className="text-[10px] text-gray-500 mt-1">x{selectedQuantity}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { void handleDraw(i); }}
+                          disabled={remainingSelectable === 0}
+                          className={`mt-1.5 bg-gray-900 text-white rounded-xl font-black disabled:opacity-10 active:scale-95 transition-all ${isUltraDenseAccounting ? "px-1.5 py-1 text-[10px]" : "px-2 py-2 text-xs lg:text-sm"}`}
+                        >
+                          DRAW
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="col-span-4 h-[50vh] overflow-y-auto pr-2">
+              {counts.map((count: number, i: number) => (
+                <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow mb-3">
+                  <div>
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">{prizeLabels[i] || `${i + 1}等`}</p>
+                    <p className="text-3xl font-black text-gray-900">{count}</p>
+                  </div>
+                  <button
+                    onClick={() => handleDraw(i)}
+                    disabled={count === 0}
+                    className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold disabled:opacity-10 active:scale-95 transition-all"
+                  >
+                    DRAW
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!isAccountingMode && (
           <div className="col-span-12">
             <div className="bg-white p-5 rounded-2xl border border-gray-200">
               <div className="flex items-center justify-between mb-4">
@@ -605,6 +1101,7 @@ export default function Home() {
               </div>
             </div>
           </div>
+          )}
         </main>
       </div>
 
@@ -616,6 +1113,14 @@ export default function Home() {
             <img src="/favicon.ico" alt="icon" className="w-10 h-10" />
             <h1 className="text-[12px] font-black text-gray-900 tracking-[0.3em] uppercase">Count kun</h1>
             <div className="flex gap-2">
+              {isAccountingMode && (
+                <button
+                  onClick={() => router.push("/home/analytics")}
+                  className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full"
+                >
+                  グラフ
+                </button>
+              )}
               {measuring && (
                 <button 
                   onClick={async () => {
@@ -642,59 +1147,148 @@ export default function Home() {
               </button>
             </div>
           </div>
-          
+
+          {!isAccountingMode && (
           <div className="flex-1 min-h-[300px] w-full bg-gray-50 rounded-[40px] p-5 shadow-inner border border-gray-100 relative">
+            {isAccountingMode && (
+              <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-full border border-gray-200 bg-white/90 p-1">
+                <button
+                  onClick={() => setChartView("inventory")}
+                  className={`text-[10px] font-black px-2 py-1 rounded-full ${chartView === "inventory" ? "bg-gray-900 text-white" : "text-gray-500"}`}
+                >
+                  在庫
+                </button>
+                <button
+                  onClick={() => setChartView("sales")}
+                  className={`text-[10px] font-black px-2 py-1 rounded-full ${chartView === "sales" ? "bg-gray-900 text-white" : "text-gray-500"}`}
+                >
+                  売上
+                </button>
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+              <LineChart data={activeChartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E9ECEF" />
-                <XAxis 
-                  dataKey="timestamp" 
-                  type="number" 
+                <XAxis
+                  dataKey="timestamp"
+                  type="number"
                   domain={[
                     `dataMin - ${xAxisPaddingMs}`,
                     `dataMax + ${xAxisPaddingMs}`,
-                  ]} 
+                  ]}
                   tickFormatter={formatTime}
                   fontSize={10}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis fontSize={10} axisLine={false} tickLine={false} />
-                <Tooltip 
+                <Tooltip
                   content={renderTooltipContent}
                 />
-                {renderLineContent()}
+                {isAccountingMode && chartView === "sales" ? renderSalesLineContent() : renderInventoryLineContent()}
               </LineChart>
             </ResponsiveContainer>
-            {history.length === 0 && (
+            {chartEmpty && (
               <div className="absolute left-5 top-5 rounded-md bg-white/90 px-2 py-1 border border-gray-100 text-[10px] text-gray-500">
                 現在在庫を表示中
               </div>
             )}
           </div>
+          )}
+          {isAccountingMode && (
+            <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+              <p className="text-xs font-black text-emerald-700">会計操作ページ</p>
+              <p className="text-[10px] text-emerald-600 mt-1">グラフとコメントは「グラフ」ボタンで切り替えできます</p>
+            </div>
+          )}
           <p className="text-[10px] text-gray-500 mt-3 text-center">コメントはグラフ上の点とツールチップに表示されます</p>
         </div>
 
         {/* 携帯版 下部ナビゲーション兼操作パネル */}
         <div className="bg-white border-t border-gray-100 p-6 pb-20 rounded-t-[48px] shadow-[0_-25px_50px_-12px_rgba(0,0,0,0.08)] flex-shrink-0">
+          {isAccountingMode && (
+            <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-[11px] font-black text-emerald-700 mb-2">会計モード</p>
+              <p className="text-[10px] font-bold text-gray-500">お支払い金額合計</p>
+              <div className="w-full mt-1 mb-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xl font-black text-gray-900">
+                ¥{accountingTotalAmount.toLocaleString("ja-JP")}
+              </div>
+              <p className="text-[10px] text-gray-500 mb-2">選択商品数: {totalSelectedItems}</p>
+              <input
+                type="number"
+                min="0"
+                value={paymentInput}
+                onChange={(e) => setPaymentInput(e.target.value)}
+                placeholder="お受け取り金額"
+                className="w-full mb-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-bold text-gray-900"
+              />
+              <div className="rounded-lg border border-emerald-100 bg-white p-2 mb-2">
+                <p className="text-[10px] font-bold text-emerald-700">会計結果</p>
+                <p className="text-lg font-black text-emerald-700 mt-1">{lastAccountingResult ? `¥${lastAccountingResult.change.toLocaleString("ja-JP")}` : "¥0"}</p>
+                <p className="text-[10px] text-emerald-700 mt-1 min-h-[12px]">
+                  {lastAccountingResult ? `${lastAccountingResult.summary} / 受取 ¥${lastAccountingResult.paid.toLocaleString("ja-JP")}` : "会計ボタンでおつり表示"}
+                </p>
+              </div>
+              <div className="grid grid-cols-5 gap-1">
+                {calculatorButtons.map((key) => (
+                  <button
+                    key={`calc-mobile-${key}`}
+                    onClick={() => handleCalculatorPress(key === "×" ? "*" : key === "÷" ? "/" : key)}
+                    className={`rounded-md py-1.5 text-[11px] font-black border ${
+                      key === "会計" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-700 border-gray-200"
+                    }`}
+                  >
+                    {key}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <button
+                  onClick={() => { void handleUndo(); }}
+                  disabled={isUndoing || (cartActionStack.length === 0 && history.length === 0)}
+                  className="rounded-lg bg-amber-500 text-white font-black py-2 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  ↩ ひとつ戻す
+                </button>
+                <button
+                  onClick={() => router.push("/home/accounting-history")}
+                  disabled={accountingHistory.length === 0}
+                  className="rounded-lg border border-emerald-200 text-emerald-700 font-black py-2 disabled:text-gray-300 disabled:border-gray-200"
+                >
+                  履歴
+                </button>
+              </div>
+            </div>
+          )}
           <div className={`grid gap-3 mb-8 ${counts.length <= 5 ? 'grid-cols-5' : counts.length <= 10 ? 'grid-cols-5' : 'grid-cols-6'}`}>
-            {counts.map((count: number, i: number) => (
-              <button
-                key={i}
-                onClick={() => handleDraw(i)}
-                disabled={count === 0}
-                className={`
-                  aspect-[4/5] rounded-2xl flex flex-col items-center justify-center transition-all
-                  ${count === 0 ? "bg-gray-50 text-gray-200" : "bg-white shadow-lg border border-gray-100 active:scale-90"}
-                `}
-              >
-                <span className="text-[10px] font-black opacity-50 mb-1 max-w-[64px] truncate">{prizeLabels[i] || `${i + 1}等`}</span>
-                <span className={`text-xl font-black ${count <= 3 && count > 0 ? "text-orange-500" : "text-gray-900"}`}>{count}</span>
-                <div className="w-4 h-[3px] rounded-full mt-2" style={{ backgroundColor: colors[i] }}></div>
-              </button>
-            ))}
+            {counts.map((count: number, i: number) => {
+              const selectedQuantity = cartQuantities[i] ?? 0;
+              const remainingSelectable = Math.max(0, count - selectedQuantity);
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => {
+                    void handleDraw(i);
+                  }}
+                  disabled={remainingSelectable === 0}
+                  className={`
+                    aspect-[4/5] rounded-2xl flex flex-col items-center justify-center transition-all
+                    ${remainingSelectable === 0 ? "bg-gray-50 text-gray-200" : selectedQuantity > 0 ? "bg-emerald-50 shadow-lg border border-emerald-200 active:scale-90" : "bg-white shadow-lg border border-gray-100 active:scale-90"}
+                  `}
+                >
+                  <span className="text-[10px] font-black opacity-50 mb-1 max-w-[64px] truncate">{prizeLabels[i] || `${i + 1}等`}</span>
+                  <span className={`text-xl font-black ${count <= 3 && count > 0 ? "text-orange-500" : "text-gray-900"}`}>{count}</span>
+                  {isAccountingMode && (
+                    <span className="text-[9px] font-bold text-emerald-600 mt-1">¥{Number(prices[i] ?? 0).toLocaleString("ja-JP")} / x{selectedQuantity}</span>
+                  )}
+                  <div className="w-4 h-[3px] rounded-full mt-2" style={{ backgroundColor: colors[i] }}></div>
+                </button>
+              );
+            })}
           </div>
 
+          {!isAccountingMode && (
           <div className="mb-4 rounded-2xl border border-gray-200 bg-gray-50 p-3 space-y-2">
             <p className="text-[11px] font-semibold text-gray-600">メモ</p>
             <select
@@ -724,6 +1318,7 @@ export default function Home() {
               </button>
             </div>
           </div>
+          )}
           
           <div className="flex gap-3 mb-3">
             <button 
@@ -756,6 +1351,17 @@ export default function Home() {
           </div>
 
           <div className="flex gap-3 mb-3">
+            <button
+              onClick={handleUndo}
+              disabled={isUndoing || history.length === 0}
+              className={`flex-1 py-3 font-black rounded-xl transition-all active:scale-[0.98] text-sm ${
+                isUndoing || history.length === 0
+                  ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                  : "bg-amber-500 text-white"
+              }`}
+            >
+              ↩ ひとつ戻す
+            </button>
             {isAdmin && (
               <button 
                 onClick={() => router.push("/admin")}

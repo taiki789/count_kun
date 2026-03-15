@@ -14,7 +14,7 @@ function getAdminDB() {
       let parsedKey;
       try {
         parsedKey = JSON.parse(key);
-      } catch (parseError) {
+      } catch {
         throw new Error(`FIREBASE_ADMIN_SDK_KEY is not valid JSON`);
       }
       initializeApp({
@@ -45,7 +45,7 @@ export async function DELETE(
     await adminDb.collection('datasets').doc(datasetId).delete();
     
     return NextResponse.json({ message: "Dataset deleted successfully" });
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Delete dataset error:", errorMessage);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
@@ -72,13 +72,17 @@ export async function GET(
       return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
     }
     
+    const docData = (doc.data() as Record<string, unknown> | undefined) || {};
+    const createdAtSource = docData.createdAt as { toDate?: () => Date } | undefined;
+    const updatedAtSource = docData.updatedAt as { toDate?: () => Date } | undefined;
+
     return NextResponse.json({
       id: doc.id,
-      ...doc.data(),
-      createdAt: (doc.data() as any).createdAt?.toDate().toISOString() || new Date().toISOString(),
-      updatedAt: (doc.data() as any).updatedAt?.toDate().toISOString() || new Date().toISOString(),
+      ...docData,
+      createdAt: createdAtSource?.toDate?.().toISOString() || new Date().toISOString(),
+      updatedAt: updatedAtSource?.toDate?.().toISOString() || new Date().toISOString(),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Get dataset error:", errorMessage);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
@@ -93,7 +97,7 @@ export async function GET(
       try {
         const adminDb = getAdminDB();
         const body = await request.json();
-        const { prizeCount, prizeLabels } = body;
+        const { prizeCount, prizeLabels, mode } = body;
         const resolvedParams = await params;
         const datasetId = resolvedParams.id;
     
@@ -103,6 +107,10 @@ export async function GET(
     
         if (!Number.isInteger(prizeCount) || prizeCount < 1 || prizeCount > 20) {
           return NextResponse.json({ error: "prizeCount must be an integer between 1 and 20" }, { status: 400 });
+        }
+
+        if (typeof mode !== "undefined" && mode !== "inventory" && mode !== "accounting") {
+          return NextResponse.json({ error: "mode must be inventory or accounting" }, { status: 400 });
         }
     
         // prizeLabels の空白チェック
@@ -120,10 +128,18 @@ export async function GET(
           return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
         }
 
-        const currentData = doc.data() as any;
+        const currentData = (doc.data() as Record<string, unknown> | undefined) || {};
         const currentCounts: number[] = Array.isArray(currentData?.counts) ? currentData.counts : [];
         const currentCount = currentCounts.length;
         const resetApplied = currentCount !== prizeCount;
+        const safeMode = mode === "accounting"
+          ? "accounting"
+          : (currentData.mode === "accounting" ? "accounting" : "inventory");
+        const currentPrices: number[] = Array.isArray(currentData?.prices) ? currentData.prices : [];
+        const safePrices = Array.from({ length: prizeCount }, (_, i) => {
+          const value = Number(currentPrices[i]);
+          return Number.isFinite(value) && value >= 0 ? value : 0;
+        });
 
         const safePrizeLabels = Array.isArray(prizeLabels) && prizeLabels.length === prizeCount
           ? prizeLabels.map((label: unknown) => String(label ?? "").trim())
@@ -135,6 +151,7 @@ export async function GET(
 
         const updatePayload: Record<string, unknown> = {
           prizeLabels: safePrizeLabels,
+          mode: safeMode,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
@@ -142,7 +159,11 @@ export async function GET(
           const resetCounts = Array(prizeCount).fill(0);
           updatePayload.counts = resetCounts;
           updatePayload.initialCounts = resetCounts;
+          updatePayload.prices = safePrices;
           updatePayload.history = [];
+          updatePayload.accountingHistory = [];
+        } else if (currentPrices.length !== prizeCount) {
+          updatePayload.prices = safePrices;
         }
 
         await docRef.update(updatePayload);
@@ -153,11 +174,13 @@ export async function GET(
           message: "Dataset updated successfully",
           id: datasetId,
           prizeCount,
+          mode: safeMode,
           prizeLabels: safePrizeLabels,
           resetApplied,
+          prices: resetApplied || currentPrices.length !== prizeCount ? safePrices : currentPrices,
           counts: responseCounts,
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("Update dataset error:", errorMessage);
         return NextResponse.json({ error: errorMessage }, { status: 500 });

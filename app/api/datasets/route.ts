@@ -59,6 +59,8 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const name = body.name as string;
     const initialCounts = (body.initialCounts as number[]) || [50, 30, 20, 10, 5];
+    const mode = body.mode;
+    const prices = body.prices;
     const prizeLabels = body.prizeLabels as unknown[];
     
     if (!name || name.trim() === '') {
@@ -76,14 +78,22 @@ export async function POST(request: Request) {
     const safePrizeLabels = Array.isArray(prizeLabels) && prizeLabels.length === initialCounts.length
       ? prizeLabels.map((label: unknown) => String(label ?? "").trim())
       : Array.from({ length: initialCounts.length }, (_, i) => `${i + 1}等`);
+    const safeMode = mode === "accounting" ? "accounting" : "inventory";
+    const safePrices = Array.from({ length: initialCounts.length }, (_, i) => {
+      const value = Array.isArray(prices) ? Number(prices[i]) : 0;
+      return Number.isFinite(value) && value >= 0 ? value : 0;
+    });
 
     // 新しいデータセット作成
     const newDataset = {
       name: name.trim(),
       counts: initialCounts,
       initialCounts: initialCounts,
+      mode: safeMode,
+      prices: safePrices,
       prizeLabels: safePrizeLabels,
       history: [],
+      accountingHistory: [],
       measuring: false,
       startTimestamp: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),

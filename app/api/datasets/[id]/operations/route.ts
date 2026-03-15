@@ -36,7 +36,7 @@ export async function PATCH(
   try {
     const adminDb = getAdminDB();
     const body = await request.json();
-    const { action, counts, entry, timestamp, memo } = body;
+    const { action, counts, entry, timestamp, memo, prices, accountingRecord } = body;
     
     const resolvedParams = await params;
     const datasetId = resolvedParams.id;
@@ -53,6 +53,7 @@ export async function PATCH(
       await docRef.update({
         counts: zeroCounts,
         history: [],
+        accountingHistory: [],
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       return NextResponse.json({ message: "Reset Success" });
@@ -95,14 +96,101 @@ export async function PATCH(
     }
 
     if (action === 'setCounts') {
+      const nextCounts = Array.isArray(counts) ? counts : [];
+      const safePrices = Array.from({ length: nextCounts.length }, (_, i) => {
+        const value = Array.isArray(prices) ? Number(prices[i]) : 0;
+        return Number.isFinite(value) && value >= 0 ? value : 0;
+      });
+
       // カウント値を設定、ヒストリをクリア
       await docRef.update({
-        counts: counts,
-        initialCounts: counts,
+        counts: nextCounts,
+        initialCounts: nextCounts,
+        prices: safePrices,
         history: [],
+        accountingHistory: [],
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       return NextResponse.json({ message: "Counts Set Success" });
+    }
+
+    if (action === 'completeAccounting') {
+      const nextCounts = Array.isArray(counts) ? counts : [];
+      const historyEntry = entry as Record<string, unknown> | undefined;
+      const transaction = accountingRecord as Record<string, unknown> | undefined;
+
+      if (!historyEntry || typeof historyEntry !== 'object') {
+        return NextResponse.json({ error: "Invalid history entry" }, { status: 400 });
+      }
+      if (!transaction || typeof transaction !== 'object') {
+        return NextResponse.json({ error: "Invalid accounting record" }, { status: 400 });
+      }
+
+      await docRef.update({
+        counts: nextCounts,
+        history: admin.firestore.FieldValue.arrayUnion(historyEntry),
+        accountingHistory: admin.firestore.FieldValue.arrayUnion(transaction),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return NextResponse.json({ message: "Accounting Completed", updated: true });
+    }
+
+    if (action === 'undoLastAction') {
+      const snapshot = await docRef.get();
+      const currentData = snapshot.data() as Record<string, unknown> | undefined;
+      const currentHistory = (currentData?.history as Record<string, unknown>[] | undefined) || [];
+      const currentAccountingHistory = (currentData?.accountingHistory as Record<string, unknown>[] | undefined) || [];
+      const currentCounts = (currentData?.counts as number[] | undefined) || [];
+      const currentInitialCounts = (currentData?.initialCounts as number[] | undefined) || [];
+
+      if (currentHistory.length === 0) {
+        return NextResponse.json({ message: "Nothing to undo", skipped: true });
+      }
+
+      const nextHistory = currentHistory.slice(0, -1);
+      const fallbackLength = Math.max(currentCounts.length, currentInitialCounts.length, 1);
+
+      const toSafeCount = (value: unknown) => {
+        const num = Number(value);
+        return Number.isFinite(num) && num >= 0 ? num : 0;
+      };
+
+      const extractCountsFromEntry = (historyEntry: Record<string, unknown>) => {
+        const keyLengths = Object.keys(historyEntry)
+          .map((key) => {
+            const match = key.match(/^p(\d+)$/);
+            return match ? Number(match[1]) : 0;
+          })
+          .filter((len) => Number.isInteger(len) && len > 0);
+
+        const seriesLength = keyLengths.length > 0 ? Math.max(...keyLengths) : fallbackLength;
+        return Array.from({ length: seriesLength }, (_, index) => toSafeCount(historyEntry[`p${index + 1}`]));
+      };
+
+      const nextCounts = nextHistory.length > 0
+        ? extractCountsFromEntry(nextHistory[nextHistory.length - 1])
+        : Array.from({ length: fallbackLength }, (_, index) => toSafeCount(currentInitialCounts[index] ?? 0));
+
+      const removedHistoryEntry = currentHistory[currentHistory.length - 1];
+      const removedHistoryTimestamp = Number(removedHistoryEntry?.timestamp);
+      const nextAccountingHistory = Number.isFinite(removedHistoryTimestamp)
+        ? currentAccountingHistory.filter((record) => Number(record?.historyTimestamp) !== removedHistoryTimestamp)
+        : currentAccountingHistory;
+
+      await docRef.update({
+        counts: nextCounts,
+        history: nextHistory,
+        accountingHistory: nextAccountingHistory,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return NextResponse.json({
+        message: "Undo Success",
+        updated: true,
+        counts: nextCounts,
+        history: nextHistory,
+        accountingHistory: nextAccountingHistory,
+      });
     }
 
     if (action === 'addMemo') {

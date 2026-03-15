@@ -4,7 +4,7 @@ import React, { useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { PrizeContext } from "../PrizeContext";
+import { PrizeContext, Dataset, OperationMode } from "../PrizeContext";
 import Link from "next/link";
 
 export default function Admin() {
@@ -15,14 +15,16 @@ export default function Admin() {
     name: "",
     counts: ["50", "30", "20", "10", "5"],
     prizeLabels: ["1等", "2等", "3等", "4等", "5等"],
+    mode: "inventory" as OperationMode,
   });
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
-  const [editingDataset, setEditingDataset] = useState<any>(null);
+  const [editingDataset, setEditingDataset] = useState<Dataset | null>(null);
   const [editPrizeCount, setEditPrizeCount] = useState(5);
   const [editPrizeLabels, setEditPrizeLabels] = useState<string[]>([]);
+  const [editMode, setEditMode] = useState<OperationMode>("inventory");
 
   const buildDefaultLabels = (length: number) => Array.from({ length }, (_, i) => `${i + 1}等`);
 
@@ -46,8 +48,8 @@ export default function Admin() {
   }, [router, adminEmail]);
 
   useEffect(() => {
-    fetchDatasets();
-  }, []);
+    void fetchDatasets();
+  }, [fetchDatasets]);
 
   const handleCreateDataset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +76,12 @@ export default function Admin() {
       const res = await fetch("/api/datasets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: formData.name, initialCounts: numCounts, prizeLabels: safePrizeLabels }),
+        body: JSON.stringify({
+          name: formData.name,
+          initialCounts: numCounts,
+          prizeLabels: safePrizeLabels,
+          mode: formData.mode,
+        }),
       });
 
       if (!res.ok) {
@@ -89,6 +96,7 @@ export default function Admin() {
         name: "",
         counts: ["50", "30", "20", "10", "5"],
         prizeLabels: ["1等", "2等", "3等", "4等", "5等"],
+        mode: "inventory",
       });
       await fetchDatasets();
       // 作成したデータセットを選択して計測開始
@@ -126,10 +134,11 @@ export default function Admin() {
     }
   };
 
-  const handleEditDataset = (dataset: any) => {
+  const handleEditDataset = (dataset: Dataset) => {
     setEditingDataset(dataset);
     const count = dataset.counts.length || 5;
     setEditPrizeCount(count);
+    setEditMode(dataset.mode === "accounting" ? "accounting" : "inventory");
     const sourceLabels = Array.isArray(dataset.prizeLabels) && dataset.prizeLabels.length === count
       ? dataset.prizeLabels
       : buildDefaultLabels(count);
@@ -176,7 +185,11 @@ export default function Admin() {
       const res = await fetch(`/api/datasets/${editingDataset.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prizeCount: editPrizeCount, prizeLabels: editPrizeLabels }),
+        body: JSON.stringify({
+          prizeCount: editPrizeCount,
+          prizeLabels: editPrizeLabels,
+          mode: editMode,
+        }),
       });
 
       const result = await res.json();
@@ -186,6 +199,7 @@ export default function Admin() {
       setEditingDataset(null);
       setEditPrizeCount(5);
       setEditPrizeLabels([]);
+      setEditMode("inventory");
       await fetchDatasets();
       startMeasurement(); // 計測開始
     } catch (error) {
@@ -201,6 +215,7 @@ export default function Admin() {
     setEditingDataset(null);
     setEditPrizeCount(5);
     setEditPrizeLabels([]);
+    setEditMode("inventory");
   };
 
   const handleCountChange = (index: number, value: string) => {
@@ -218,7 +233,7 @@ export default function Admin() {
   const handlePrizeCountChange = (count: number) => {
     setPrizeCount(count);
     // 新しい賞品数に合わせて counts 配列を調整
-    const newCounts = Array(count).fill("").map((_, i) => formData.counts[i] || "0");
+    const newCounts = Array(count).fill("").map((_, i) => formData.counts[i] ?? "0");
     const newLabels = Array(count).fill("").map((_, i) => formData.prizeLabels[i] || `${i + 1}等`);
     setFormData({ ...formData, counts: newCounts, prizeLabels: newLabels });
   };
@@ -299,6 +314,19 @@ export default function Admin() {
               {/* 賞品数選択 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
+                  モード
+                </label>
+                <select
+                  id="dataset-mode"
+                  name="dataset-mode"
+                  value={formData.mode}
+                  onChange={(e) => setFormData({ ...formData, mode: e.target.value === "accounting" ? "accounting" : "inventory" })}
+                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-900 focus:border-indigo-500 focus:outline-none mb-4"
+                >
+                  <option value="inventory">在庫管理モード（通常）</option>
+                  <option value="accounting">会計モード（おつり計算）</option>
+                </select>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
                   賞品数
                 </label>
                 <select
@@ -353,7 +381,7 @@ export default function Admin() {
                         name={`count-${i}`}
                         type="number"
                         min="0"
-                        value={formData.counts[i] || "0"}
+                        value={formData.counts[i] ?? ""}
                         onChange={(e) => handleCountChange(i, e.target.value)}
                         className="w-full border-2 border-gray-200 rounded-lg px-2 py-2 text-lg font-black text-gray-900 text-center focus:border-indigo-500 focus:outline-none"
                       />
@@ -407,6 +435,9 @@ export default function Admin() {
                         <p className="text-xs text-indigo-600 font-bold mt-1">
                           賞品数: {dataset.counts.length}個
                         </p>
+                        <p className="text-xs font-bold mt-1 text-emerald-600">
+                          モード: {dataset.mode === "accounting" ? "会計" : "在庫管理"}
+                        </p>
                       </div>
                         <div className="flex gap-2">
                           <button
@@ -448,6 +479,22 @@ export default function Admin() {
                 データセットを編集
               </h2>
               <form onSubmit={handleUpdateDataset} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-3">
+                    モード
+                  </label>
+                  <select
+                    id="edit-mode"
+                    name="edit-mode"
+                    value={editMode}
+                    onChange={(e) => setEditMode(e.target.value === "accounting" ? "accounting" : "inventory")}
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-900 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="inventory">在庫管理モード（通常）</option>
+                    <option value="accounting">会計モード（おつり計算）</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-3">
                     データ数

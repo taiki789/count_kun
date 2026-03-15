@@ -167,6 +167,7 @@ export default function Results() {
   // 売上計算（最初の在庫設定値 - 計測終了時の在庫値）
   const salesData = (() => {
     if (!currentDataset) return [];
+    const priceList = Array.isArray(currentDataset.prices) ? currentDataset.prices : [];
     const initialCounts = Array.isArray(currentDataset.initialCounts)
       ? currentDataset.initialCounts
       : [];
@@ -187,12 +188,16 @@ export default function Results() {
         initial,
         remaining,
         sold: Math.max(0, initial - remaining),
+        price: Number(priceList[i] ?? 0),
+        revenue: Math.max(0, initial - remaining) * (Number(priceList[i] ?? 0) || 0),
         color: baseColors[i % baseColors.length],
       };
     });
   })();
 
   const totalSold = salesData.reduce((sum, item) => sum + item.sold, 0);
+  const totalRevenue = salesData.reduce((sum, item) => sum + item.revenue, 0);
+  const isAccountingMode = currentDataset?.mode === "accounting";
 
   const commentEntries = (() => {
     return resultHistory
@@ -347,15 +352,23 @@ export default function Results() {
                     <span className="font-bold text-gray-900 text-sm md:text-base">{item.label}</span>
                   </div>
                   <div className="text-right">
-                    <p className="text-xl md:text-2xl font-black text-gray-900">{item.sold}個</p>
-                    <p className="text-[10px] md:text-xs text-gray-500">{item.initial}個 → {item.remaining}個</p>
+                    <p className="text-xl md:text-2xl font-black text-gray-900">
+                      {isAccountingMode ? `¥${item.revenue.toLocaleString("ja-JP")}` : `${item.sold}個`}
+                    </p>
+                    <p className="text-[10px] md:text-xs text-gray-500">
+                      {item.initial}個 → {item.remaining}個 / {item.sold}個販売 {isAccountingMode ? `/ ¥${item.price.toLocaleString("ja-JP")}` : ""}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
             <div className="mt-4 md:mt-6 p-4 md:p-6 bg-indigo-50 rounded-xl border-2 border-indigo-200">
-              <p className="text-xs md:text-sm font-bold text-indigo-700 mb-1">合計売上</p>
-              <p className="text-3xl md:text-4xl font-black text-indigo-900">{totalSold}個</p>
+              <p className="text-xs md:text-sm font-bold text-indigo-700 mb-1">
+                {isAccountingMode ? "合計売上" : "合計販売数"}
+              </p>
+              <p className="text-3xl md:text-4xl font-black text-indigo-900">
+                {isAccountingMode ? `¥${totalRevenue.toLocaleString("ja-JP")}` : `${totalSold}個`}
+              </p>
             </div>
           </div>
 

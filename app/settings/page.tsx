@@ -9,8 +9,9 @@ import Link from "next/link";
 
 function CounterForm({ isMobile }: { isMobile: boolean }) {
   const router = useRouter();
-  const { counts, prizeLabels, resetContext, currentDatasetId, startMeasurement, datasets } = useContext(PrizeContext);
+  const { counts, prices, prizeLabels, resetContext, currentDatasetId, startMeasurement, datasets } = useContext(PrizeContext);
   const [numbers, setNumbers] = useState<string[]>([]);
+  const [priceNumbers, setPriceNumbers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [initializedDatasetId, setInitializedDatasetId] = useState<string | null>(null);
 
@@ -20,11 +21,17 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
   useEffect(() => {
     if (counts.length > 0 && initializedDatasetId !== currentDatasetId) {
       setNumbers(counts.map(c => String(c)));
+      setPriceNumbers(counts.map((_, i) => String(prices[i] ?? 0)));
       setInitializedDatasetId(currentDatasetId);
     }
-  }, [counts, currentDatasetId, initializedDatasetId]);
+  }, [counts, prices, currentDatasetId, initializedDatasetId]);
 
   const total = numbers.reduce((sum, n) => sum + (Number(n) || 0), 0);
+  const totalRevenue = numbers.reduce((sum, n, i) => {
+    const countValue = Number(n) || 0;
+    const priceValue = Number(priceNumbers[i]) || 0;
+    return sum + countValue * priceValue;
+  }, 0);
 
   const handleChange = (index: number, value: string) => {
     const updated = [...numbers];
@@ -32,12 +39,19 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
     setNumbers(updated);
   };
 
+  const handlePriceChange = (index: number, value: string) => {
+    const updated = [...priceNumbers];
+    updated[index] = value;
+    setPriceNumbers(updated);
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     try {
       const numValues = numbers.map((n) => Number(n) || 0);
-      await resetContext(numValues);
+      const priceValues = priceNumbers.map((n) => Number(n) || 0);
+      await resetContext(numValues, priceValues);
       await startMeasurement(); // 計測開始
       router.push("/home");
     } catch (error) {
@@ -60,6 +74,17 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
         placeholder="0"
         className="w-full rounded-xl border-2 border-gray-100 p-3 text-lg font-bold focus:border-blue-500 focus:outline-none text-black"
         onChange={(e) => handleChange(i, e.target.value)}
+      />
+      <label htmlFor={`price-${i}`} className="text-[10px] font-bold text-gray-500 mt-2 mb-1">金額 (円)</label>
+      <input
+        id={`price-${i}`}
+        name={`price-${i}`}
+        type="number"
+        min="0"
+        value={priceNumbers[i] ?? ""}
+        placeholder="0"
+        className="w-full rounded-xl border-2 border-gray-100 p-3 text-base font-bold focus:border-emerald-500 focus:outline-none text-black"
+        onChange={(e) => handlePriceChange(i, e.target.value)}
       />
     </div>
   ));
@@ -91,6 +116,7 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
         <div className="text-center md:text-left">
           <p className="text-sm text-gray-400">Total Items</p>
           <p className="text-3xl font-black text-blue-600">{total}</p>
+          <p className="text-xs text-emerald-600 mt-1">想定売上: ¥{totalRevenue.toLocaleString("ja-JP")}</p>
         </div>
 
         

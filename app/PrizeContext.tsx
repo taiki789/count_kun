@@ -13,11 +13,33 @@ export type HistoryData = {
   [key: string]: number | string | boolean | undefined; // p1, p2... と changedP1, changedP2... を動的に持つ
 };
 
+export type AccountingItem = {
+  prizeIndex: number;
+  label: string;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+};
+
+export type AccountingRecord = {
+  id: string;
+  timestamp: number;
+  time: string;
+  totalAmount: number;
+  receivedAmount: number;
+  change: number;
+  historyTimestamp: number;
+  items: AccountingItem[];
+};
+
 export type Dataset = {
   id: string;
   name: string;
   counts: number[];
   history: HistoryData[];
+  accountingHistory?: AccountingRecord[];
+  mode?: OperationMode;
+  prices?: number[];
   prizeLabels?: string[];
   initialCounts?: number[];
   createdAt: string;
@@ -26,15 +48,23 @@ export type Dataset = {
   startTimestamp?: number | null;
 };
 
+export type OperationMode = "inventory" | "accounting";
+
 type PrizeContextType = {
   counts: number[];
+  initialCounts: number[];
+  prices: number[];
+  mode: OperationMode;
   history: HistoryData[];
+  accountingHistory: AccountingRecord[];
   prizeLabels: string[];
   addHistory: (newCounts: number[]) => Promise<void>;
   addMemo: (timestamp: number, memo: string) => Promise<void>;
   addMemoPoint: (prizeIndex: number, memo: string) => Promise<void>;
+  completeAccountingTransaction: (options: { newCounts: number[]; record: AccountingRecord }) => Promise<void>;
+  undoLastAction: () => Promise<void>;
   resetData: () => Promise<void>;
-  resetContext: (newCounts: number[]) => Promise<void>;
+  resetContext: (newCounts: number[], newPrices?: number[]) => Promise<void>;
   loading: boolean;
   // データセット関連
   currentDatasetId: string | null;
@@ -52,9 +82,21 @@ export const PrizeContext = createContext<PrizeContextType>({} as PrizeContextTy
 
 export function PrizeProvider({ children }: { children: ReactNode }) {
   const buildDefaultLabels = (length: number) => Array.from({ length }, (_, i) => `${i + 1}等`);
+  const normalizePrices = (input: unknown, length: number) => {
+    if (!Array.isArray(input)) return Array(length).fill(0);
+    return Array.from({ length }, (_, index) => {
+      const value = Number(input[index]);
+      return Number.isFinite(value) && value >= 0 ? value : 0;
+    });
+  };
+  const resolveMode = (input: unknown): OperationMode => (input === "accounting" ? "accounting" : "inventory");
 
   const [counts, setCounts] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [initialCounts, setInitialCounts] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [prices, setPrices] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [mode, setMode] = useState<OperationMode>("inventory");
   const [history, setHistory] = useState<HistoryData[]>([]);
+  const [accountingHistory, setAccountingHistory] = useState<AccountingRecord[]>([]);
   const [prizeLabels, setPrizeLabels] = useState<string[]>(buildDefaultLabels(5));
   const [loading, setLoading] = useState(true);
   const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
@@ -64,7 +106,15 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
   
   // 各データセットのキャッシュ（独立した時間・データを保持）
   const [datasetCache, setDatasetCache] = useState<{
-    [datasetId: string]: { counts: number[]; history: HistoryData[]; prizeLabels: string[] };
+    [datasetId: string]: {
+      counts: number[];
+      initialCounts: number[];
+      prices: number[];
+      mode: OperationMode;
+      history: HistoryData[];
+      accountingHistory: AccountingRecord[];
+      prizeLabels: string[];
+    };
   }>({});
   const datasetCacheRef = useRef(datasetCache);
 
@@ -91,7 +141,11 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
       const cached = datasetCacheRef.current[normalizedId];
       if (cached) {
         setCounts(cached.counts);
+        setInitialCounts(cached.initialCounts);
+        setPrices(cached.prices);
+        setMode(cached.mode);
         setHistory(cached.history);
+        setAccountingHistory(cached.accountingHistory);
         setPrizeLabels(cached.prizeLabels);
         setCurrentDatasetId(normalizedId);
         localStorage.setItem('selectedDatasetId', normalizedId);
@@ -102,13 +156,30 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
           if (res.ok) {
             const data: Dataset = await res.json();
             const newCounts = data.counts || [0, 0, 0, 0, 0];
+            const newInitialCounts = (data.initialCounts && data.initialCounts.length === newCounts.length)
+              ? data.initialCounts
+              : newCounts;
             const newPrizeLabels = (data.prizeLabels && data.prizeLabels.length === newCounts.length)
               ? data.prizeLabels
               : buildDefaultLabels(newCounts.length);
-            const newCached = { counts: newCounts, history: data.history || [], prizeLabels: newPrizeLabels };
+            const newPrices = normalizePrices(data.prices, newCounts.length);
+            const newMode = resolveMode(data.mode);
+            const newCached = {
+              counts: newCounts,
+              initialCounts: newInitialCounts,
+              prices: newPrices,
+              mode: newMode,
+              history: data.history || [],
+              accountingHistory: data.accountingHistory || [],
+              prizeLabels: newPrizeLabels,
+            };
             setDatasetCache(prev => ({ ...prev, [normalizedId]: newCached }));
             setCounts(newCached.counts);
+            setInitialCounts(newCached.initialCounts);
+            setPrices(newCached.prices);
+            setMode(newCached.mode);
             setHistory(newCached.history);
+            setAccountingHistory(newCached.accountingHistory);
             setPrizeLabels(newCached.prizeLabels);
             
             // 計測状態も同期
@@ -133,13 +204,22 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
       const data: Dataset = await res.json();
       
       const newCounts = data.counts || [0, 0, 0, 0, 0];
+      const newInitialCounts = (data.initialCounts && data.initialCounts.length === newCounts.length)
+        ? data.initialCounts
+        : newCounts;
       const newHistory = data.history || [];
       const newPrizeLabels = (data.prizeLabels && data.prizeLabels.length === newCounts.length)
         ? data.prizeLabels
         : buildDefaultLabels(newCounts.length);
+      const newPrices = normalizePrices(data.prices, newCounts.length);
+      const newMode = resolveMode(data.mode);
       
       setCounts(newCounts);
+      setInitialCounts(newInitialCounts);
+      setPrices(newPrices);
+      setMode(newMode);
       setHistory(newHistory);
+      setAccountingHistory(data.accountingHistory || []);
       setPrizeLabels(newPrizeLabels);
       setCurrentDatasetId(normalizedId);
       localStorage.setItem('selectedDatasetId', normalizedId);
@@ -157,7 +237,15 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
       // キャッシュに保存
       setDatasetCache(prev => ({
         ...prev,
-        [normalizedId]: { counts: newCounts, history: newHistory, prizeLabels: newPrizeLabels }
+        [normalizedId]: {
+          counts: newCounts,
+          initialCounts: newInitialCounts,
+          prices: newPrices,
+          mode: newMode,
+          history: newHistory,
+          accountingHistory: data.accountingHistory || [],
+          prizeLabels: newPrizeLabels,
+        }
       }));
     } catch (error) {
       console.error('loadDataset error:', error);
@@ -188,7 +276,7 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
   }, [loadDataset]);
 
   // データセット一覧を取得
-  const fetchDatasets = async () => {
+  const fetchDatasets = useCallback(async () => {
     try {
       const res = await fetch('/api/datasets');
       if (!res.ok) throw new Error('Failed to fetch datasets');
@@ -198,7 +286,7 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
       console.error('fetchDatasets error:', error);
       throw error;
     }
-  };
+  }, []);
 
   // データセット選択
   const selectDataset = async (datasetId: string) => {
@@ -216,14 +304,24 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
           const data: Dataset = await res.json();
           
           const newCounts = data.counts || [0, 0, 0, 0, 0];
+          const newInitialCounts = (data.initialCounts && data.initialCounts.length === newCounts.length)
+            ? data.initialCounts
+            : newCounts;
+          const newPrices = normalizePrices(data.prices, newCounts.length);
+          const newMode = resolveMode(data.mode);
           const newHistory = data.history || [];
+          const newAccountingHistory = data.accountingHistory || [];
           const newPrizeLabels = (data.prizeLabels && data.prizeLabels.length === newCounts.length)
             ? data.prizeLabels
             : buildDefaultLabels(newCounts.length);
           
           // データが変更されている場合のみ更新
           setCounts(prev => JSON.stringify(prev) === JSON.stringify(newCounts) ? prev : newCounts);
+          setInitialCounts(prev => JSON.stringify(prev) === JSON.stringify(newInitialCounts) ? prev : newInitialCounts);
+          setPrices(prev => JSON.stringify(prev) === JSON.stringify(newPrices) ? prev : newPrices);
+          setMode(prev => prev === newMode ? prev : newMode);
           setHistory(prev => JSON.stringify(prev) === JSON.stringify(newHistory) ? prev : newHistory);
+          setAccountingHistory(prev => JSON.stringify(prev) === JSON.stringify(newAccountingHistory) ? prev : newAccountingHistory);
           setPrizeLabels(prev => JSON.stringify(prev) === JSON.stringify(newPrizeLabels) ? prev : newPrizeLabels);
           
           // 計測状態も同期
@@ -239,7 +337,15 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
           // キャッシュも同時に更新
           setDatasetCache(prev => ({
             ...prev,
-            [currentDatasetId]: { counts: newCounts, history: newHistory, prizeLabels: newPrizeLabels }
+            [currentDatasetId]: {
+              counts: newCounts,
+              initialCounts: newInitialCounts,
+              prices: newPrices,
+              mode: newMode,
+              history: newHistory,
+              accountingHistory: newAccountingHistory,
+              prizeLabels: newPrizeLabels,
+            }
           }));
         }
       } catch (error) {
@@ -316,7 +422,15 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
         if (!cached) {
           return {
             ...prev,
-            [currentDatasetId]: { counts: newCounts, history: [newEntry], prizeLabels },
+            [currentDatasetId]: {
+              counts: newCounts,
+              initialCounts,
+              prices,
+              mode,
+              history: [newEntry],
+              accountingHistory,
+              prizeLabels,
+            },
           };
         }
         return {
@@ -404,7 +518,15 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
         if (!cached) {
           return {
             ...prev,
-            [currentDatasetId]: { counts, history: [...history, newEntry], prizeLabels },
+            [currentDatasetId]: {
+              counts,
+              initialCounts,
+              prices,
+              mode,
+              history: [...history, newEntry],
+              accountingHistory,
+              prizeLabels,
+            },
           };
         }
         return {
@@ -443,6 +565,7 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
 
       setCounts(prev => Array(prev.length).fill(0));
       setHistory([]);
+      setAccountingHistory([]);
       setDatasetCache(prev => {
         const cached = prev[currentDatasetId];
         if (!cached) return prev;
@@ -452,6 +575,7 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
             ...cached,
             counts: Array(cached.counts.length).fill(0),
             history: [],
+            accountingHistory: [],
           },
         };
       });
@@ -461,14 +585,15 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const resetContext = async (newCounts: number[]) => {
+  const resetContext = async (newCounts: number[], newPrices?: number[]) => {
     if (!currentDatasetId) throw new Error('No dataset selected');
+    const safePrices = normalizePrices(newPrices, newCounts.length);
     
     try {
       const res = await fetch(`/api/datasets/${currentDatasetId}/operations`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'setCounts', counts: newCounts }),
+        body: JSON.stringify({ action: 'setCounts', counts: newCounts, prices: safePrices }),
       });
       if (!res.ok) {
         let errorDetail: Record<string, unknown> = {};
@@ -482,13 +607,24 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
       }
 
       setCounts(newCounts);
+      setInitialCounts(newCounts);
+      setPrices(safePrices);
       setHistory([]);
+      setAccountingHistory([]);
       setDatasetCache(prev => {
         const cached = prev[currentDatasetId];
         if (!cached) {
           return {
             ...prev,
-            [currentDatasetId]: { counts: newCounts, history: [], prizeLabels },
+            [currentDatasetId]: {
+              counts: newCounts,
+              initialCounts: newCounts,
+              prices: safePrices,
+              mode,
+              history: [],
+              accountingHistory: [],
+              prizeLabels,
+            },
           };
         }
         return {
@@ -496,12 +632,126 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
           [currentDatasetId]: {
             ...cached,
             counts: newCounts,
+            initialCounts: newCounts,
+            prices: safePrices,
             history: [],
+            accountingHistory: [],
           },
         };
       });
     } catch (error) {
       console.error('resetContext error:', error);
+      throw error;
+    }
+  };
+
+  const completeAccountingTransaction = async (options: { newCounts: number[]; record: AccountingRecord }) => {
+    if (!currentDatasetId) throw new Error('No dataset selected');
+
+    const previousCounts = counts;
+    const newEntry = createHistoryEntry(options.newCounts, previousCounts);
+    const newRecord: AccountingRecord = {
+      ...options.record,
+      historyTimestamp: newEntry.timestamp,
+    };
+
+    try {
+      const res = await fetch(`/api/datasets/${currentDatasetId}/operations`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'completeAccounting',
+          counts: options.newCounts,
+          entry: newEntry,
+          accountingRecord: newRecord,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Failed to complete accounting');
+
+      setCounts(options.newCounts);
+      setHistory(prev => [...prev, newEntry]);
+      setAccountingHistory(prev => [...prev, newRecord]);
+      setDatasetCache(prev => {
+        const cached = prev[currentDatasetId];
+        if (!cached) {
+          return {
+            ...prev,
+            [currentDatasetId]: {
+              counts: options.newCounts,
+              initialCounts,
+              prices,
+              mode,
+              history: [...history, newEntry],
+              accountingHistory: [...accountingHistory, newRecord],
+              prizeLabels,
+            },
+          };
+        }
+        return {
+          ...prev,
+          [currentDatasetId]: {
+            ...cached,
+            counts: options.newCounts,
+            history: [...cached.history, newEntry],
+            accountingHistory: [...cached.accountingHistory, newRecord],
+          },
+        };
+      });
+    } catch (error) {
+      console.error('completeAccountingTransaction error:', error);
+      throw error;
+    }
+  };
+
+  const undoLastAction = async () => {
+    if (!currentDatasetId) throw new Error('No dataset selected');
+
+    try {
+      const res = await fetch(`/api/datasets/${currentDatasetId}/operations`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'undoLastAction' }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Failed to undo last action');
+      if (result?.skipped) return;
+
+      const nextCounts = Array.isArray(result?.counts) ? result.counts.map((item: unknown) => Number(item) || 0) : counts;
+      const nextHistory = Array.isArray(result?.history) ? result.history as HistoryData[] : history;
+      const nextAccountingHistory = Array.isArray(result?.accountingHistory) ? result.accountingHistory as AccountingRecord[] : accountingHistory;
+
+      setCounts(nextCounts);
+      setHistory(nextHistory);
+      setAccountingHistory(nextAccountingHistory);
+      setDatasetCache(prev => {
+        const cached = prev[currentDatasetId];
+        if (!cached) {
+          return {
+            ...prev,
+            [currentDatasetId]: {
+              counts: nextCounts,
+              initialCounts,
+              prices,
+              mode,
+              history: nextHistory,
+              accountingHistory: nextAccountingHistory,
+              prizeLabels,
+            },
+          };
+        }
+        return {
+          ...prev,
+          [currentDatasetId]: {
+            ...cached,
+            counts: nextCounts,
+            history: nextHistory,
+            accountingHistory: nextAccountingHistory,
+          },
+        };
+      });
+    } catch (error) {
+      console.error('undoLastAction error:', error);
       throw error;
     }
   };
@@ -546,11 +796,17 @@ export function PrizeProvider({ children }: { children: ReactNode }) {
   return (
     <PrizeContext.Provider value={{ 
       counts, 
+      initialCounts,
+      prices,
+      mode,
       history, 
+      accountingHistory,
       prizeLabels,
       addHistory, 
       addMemo,
       addMemoPoint,
+      completeAccountingTransaction,
+      undoLastAction,
       resetData, 
       resetContext, 
       loading,

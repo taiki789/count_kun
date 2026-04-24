@@ -6,6 +6,7 @@ import { auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { PrizeContext, Dataset, OperationMode } from "../PrizeContext";
 import Link from "next/link";
+import { getCurrentAdminAccess } from "../../lib/adminClient";
 
 export default function Admin() {
   const router = useRouter();
@@ -28,24 +29,33 @@ export default function Admin() {
 
   const buildDefaultLabels = (length: number) => Array.from({ length }, (_, i) => `${i + 1}等`);
 
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
-
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.push("/");
-      } else if (user.email !== adminEmail) {
-        // 管理者ではない場合
-        alert("管理者のみこのページにアクセスできます");
-        router.push("/select-dataset");
+        setAuthChecking(false);
+        return;
       } else {
-        // 管理者
-        setIsAdmin(true);
+        void getCurrentAdminAccess()
+          .then((access) => {
+            const allowed = Boolean(access?.isAdmin);
+            setIsAdmin(allowed);
+            if (!allowed) {
+              alert("管理者のみこのページにアクセスできます");
+              router.push("/select-dataset");
+            }
+          })
+          .catch(() => {
+            setIsAdmin(false);
+            router.push("/select-dataset");
+          })
+          .finally(() => {
+            setAuthChecking(false);
+          });
       }
-      setAuthChecking(false);
     });
     return () => unsub();
-  }, [router, adminEmail]);
+  }, [router]);
 
   useEffect(() => {
     void fetchDatasets();
@@ -280,12 +290,20 @@ export default function Admin() {
               データセットを作成・管理します
             </p>
           </div>
-          <Link
-            href="/select-dataset"
-            className="text-indigo-600 hover:text-indigo-700 font-black text-sm underline"
-          >
-            戻る →
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/admin/accounts"
+              className="text-purple-600 hover:text-purple-700 font-black text-sm underline"
+            >
+              アカウント管理 →
+            </Link>
+            <Link
+              href="/select-dataset"
+              className="text-indigo-600 hover:text-indigo-700 font-black text-sm underline"
+            >
+              戻る →
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

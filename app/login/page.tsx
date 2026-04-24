@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { auth } from "../../lib/firebase";
+import { getCurrentAdminAccess } from "../../lib/adminClient";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -16,11 +17,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isRegister, setIsRegister] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (!u) {
+        setIsAdmin(false);
+        return;
+      }
+
+      void getCurrentAdminAccess()
+        .then((access) => setIsAdmin(Boolean(access?.isAdmin)))
+        .catch(() => setIsAdmin(false));
+    });
     return () => unsub();
   }, []);
 
@@ -62,7 +74,7 @@ export default function LoginPage() {
               <Link href="/select-dataset" className="w-full rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-white text-center font-black transition">
                 データセットを選択
               </Link>
-              {user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL && (
+              {isAdmin && (
                 <Link href="/admin" className="w-full rounded bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 text-center font-black transition">
                   🔐 管理者ページ
                 </Link>

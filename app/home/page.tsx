@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { PrizeContext } from "../PrizeContext";
+import { getCurrentAdminAccess } from "../../lib/adminClient";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -64,7 +65,6 @@ export default function Home() {
   // 賞品数に応じて色を動的に生成
   const baseColors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#f43f5e", "#06b6d4", "#10b981", "#6366f1", "#a855f7", "#14b8a6", "#f59e0b", "#84cc16", "#64748b", "#dc2626", "#7c3aed", "#db2777", "#0ea5e9"];
   const colors = counts.map((_, i) => baseColors[i % baseColors.length]);
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
   const isAccountingMode = mode === "accounting";
 
   const evaluateExpression = (expression: string) => {
@@ -292,14 +292,14 @@ export default function Home() {
       setIsLoggedIn(Boolean(user));
       if (!user) {
         router.push("/");
-      } else if (user.email === adminEmail) {
-        setIsAdmin(true);
       } else {
-        setIsAdmin(false);
+        void getCurrentAdminAccess()
+          .then((access) => setIsAdmin(Boolean(access?.isAdmin)))
+          .catch(() => setIsAdmin(false));
       }
     });
     return () => unsub();
-  }, [router, adminEmail]);
+  }, [router]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) {

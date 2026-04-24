@@ -6,24 +6,26 @@ import { auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { PrizeContext } from "../PrizeContext";
 import Link from "next/link";
+import { getCurrentAdminAccess } from "../../lib/adminClient";
 
 export default function SelectDataset() {
   const router = useRouter();
   const { datasets, selectDataset, fetchDatasets, loading } = useContext(PrizeContext);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
-
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.push("/");
-      } else if (user.email === adminEmail) {
-        setIsAdmin(true);
+        setIsAdmin(false);
+      } else {
+        void getCurrentAdminAccess()
+          .then((access) => setIsAdmin(Boolean(access?.isAdmin)))
+          .catch(() => setIsAdmin(false));
       }
     });
     return () => unsub();
-  }, [router, adminEmail]);
+  }, [router]);
 
   useEffect(() => {
     fetchDatasets();

@@ -284,7 +284,7 @@ export default function Admin() {
         <div className="flex items-center justify-between mb-10">
           <div>
             <h1 className="text-4xl font-black text-gray-900 tracking-tighter mb-1">
-              管理者ページ
+              景品管理
             </h1>
             <p className="text-gray-600 text-sm">
               データセットを作成・管理します

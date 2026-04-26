@@ -71,13 +71,20 @@ export default function LoginPage() {
           <div>
             <p className="mb-4 text-gray-600">{user.email}</p>
             <div className="flex flex-col gap-2">
-              <Link href="/select-dataset" className="w-full rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-white text-center font-black transition">
-                データセットを選択
-              </Link>
-              {isAdmin && (
-                <Link href="/admin" className="w-full rounded bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 text-center font-black transition">
-                  🔐 管理者ページ
-                </Link>
+              {isAdmin ? (
+                <>
+                  <Link href="/select-dataset" className="w-full rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-white text-center font-black transition">
+                    データセット
+                  </Link>
+                  <Link href="/admin" className="w-full rounded bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 text-center font-black transition">
+                    🔐 景品管理
+                  </Link>
+                  <Link href="/admin/accounts" className="w-full rounded bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-center font-black transition">
+                    👥 アカウント管理
+                  </Link>
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">※ このアカウントでは管理メニューは利用できません</p>
               )}
               <button
                 className="w-full rounded border border-gray-300 hover:bg-gray-50 px-4 py-2 transition"

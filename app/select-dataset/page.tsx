@@ -76,7 +76,7 @@ export default function SelectDataset() {
               href="/admin"
               className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-black px-8 py-3 rounded-full transition-all"
             >
-              管理者ページへ
+              景品管理へ
             </Link>
           </div>
         ) : (

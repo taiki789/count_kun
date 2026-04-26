@@ -168,7 +168,7 @@ export default function AdminAccountsPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/admin" className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-black text-gray-700 shadow-sm">
-              管理者ページへ戻る
+              景品管理へ戻る
             </Link>
             <Link href="/select-dataset" className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700 shadow-sm">
               データセットへ

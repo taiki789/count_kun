@@ -7,7 +7,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth"; // signOutを追加
 import { PrizeContext } from "../PrizeContext";
 import Link from "next/link";
 
-function CounterForm({ isMobile }: { isMobile: boolean }) {
+function CounterForm() {
   const router = useRouter();
   const { counts, prices, prizeLabels, resetContext, currentDatasetId, startMeasurement, datasets } = useContext(PrizeContext);
   const [numbers, setNumbers] = useState<string[]>([]);
@@ -63,7 +63,7 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
   };
 
   const inputFields = numbers.map((value, i) => (
-    <div key={i} className={`flex flex-col ${isMobile ? "w-full" : "flex-1"}`}>
+    <div key={i} className="flex flex-col w-full">
       <label htmlFor={`input-${i}`} className="text-xs font-bold text-gray-500 mb-1">{prizeLabels[i] || `${i + 1}等`}</label>
       <input
         id={`input-${i}`}
@@ -108,11 +108,11 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
           </Link>
         </div>
       )}
-      <div className={isMobile ? "space-y-4" : numbers.length <= 5 ? "flex gap-4 bg-gray-50 p-6 rounded-3xl" : "grid grid-cols-5 gap-4 bg-gray-50 p-6 rounded-3xl"}>
+      <div className={`bg-gray-50 p-4 md:p-6 rounded-3xl grid gap-4 ${numbers.length <= 5 ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-6"}`}>
         {inputFields}
       </div>
 
-      <div className={`flex items-center justify-between ${isMobile ? "flex-col gap-4" : "bg-white p-6 border-t"}`}>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-2 md:p-6 md:border-t">
         <div className="text-center md:text-left">
           <p className="text-sm text-gray-400">Total Items</p>
           <p className="text-3xl font-black text-blue-600">{total}</p>
@@ -123,7 +123,7 @@ function CounterForm({ isMobile }: { isMobile: boolean }) {
         <button
         type="submit"
         disabled={loading || numbers.length === 0}
-        className={`${isMobile ? "w-full" : "px-12"} h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50 ${isMobile ? "text-sm" : ""}`}
+        className="w-full md:w-auto md:px-12 h-14 rounded-2xl bg-gray-900 text-white font-bold shadow-xl active:scale-95 transition-all disabled:opacity-50 text-sm md:text-base"
         >
           {loading ? "処理中..." : "在庫を確定して計測開始"}
         </button>
@@ -156,52 +156,45 @@ export default function SettingsPage() {
     }
   };
 
+  const handleGoHome = () => {
+    router.push("/home");
+  };
+
   return (
     <div className="min-h-screen bg-white">
-      {/* --- PC版 UI --- */}
-      <div className="hidden md:block max-w-6xl mx-auto p-10">
-        <header className="mb-10 flex justify-between items-end">
+      <div className="max-w-6xl mx-auto px-4 py-6 pb-24 md:p-10 md:pb-10">
+        <header className="mb-8 md:mb-10 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
           <div>
-            <h1 className="text-4xl font-black text-gray-900">在庫設定</h1>
-            <p className="text-gray-400 font-medium border-l-4 border-blue-500 pl-4 mt-2">
+            <h1 className="text-3xl md:text-4xl font-black text-gray-900">在庫設定</h1>
+            <p className="text-sm md:text-base text-gray-400 font-medium border-l-4 border-blue-500 pl-4 mt-2">
               景品の初期在庫を設定して計測を開始してください
             </p>
           </div>
-          <div className="flex gap-4">
-            <Link href="/home" className="px-6 py-2 border-2 rounded-full text-sm font-bold hover:bg-gray-50 transition-colors">
-              HOME画面へ
-            </Link>
-            <button 
-              onClick={handleLogout}
-              className="px-6 py-2 border-2 border-red-100 text-red-500 rounded-full text-sm font-bold hover:bg-red-50 transition-colors"
+          <div className="grid grid-cols-2 gap-2 md:flex md:gap-4 w-full md:w-auto">
+            <button
+              onClick={handleGoHome}
+              className="px-4 md:px-6 py-2 border-2 rounded-full text-sm font-bold hover:bg-gray-50 transition-colors"
             >
-            ログアウト
+              HOME画面へ
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-4 md:px-6 py-2 border-2 border-red-100 text-red-500 rounded-full text-sm font-bold hover:bg-red-50 transition-colors"
+            >
+              ログアウト
             </button>
           </div>
         </header>
-        <div className="bg-white rounded-[3rem] shadow-2xl border border-gray-100 overflow-hidden">
-          <CounterForm isMobile={false} />
-        </div>
-      </div>
 
-      {/* --- 携帯版 UI --- */}
-      <div className="md:hidden p-6 pb-24">
-        <header className="mb-8 flex justify-between items-start">
-          <div>
-            <h1 className="text-2xl font-black text-gray-900">在庫設定</h1>
-            <p className="text-sm text-gray-500">各等の数を入力して計測開始</p>
+        <div className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-2xl border border-gray-100 overflow-hidden">
+          <div className="p-5 md:p-0">
+            <CounterForm />
           </div>
-          <button 
-            onClick={handleLogout}
-            className="text-xs font-bold text-red-400 bg-red-50 px-3 py-1 rounded-full"
-          >
-            ログアウト
-          </button>
-        </header>
-        <CounterForm isMobile={true} />
-        <div className="mt-10 flex flex-col items-center gap-6">
+        </div>
+
+        <div className="mt-6 md:hidden text-center">
           <Link href="/home" className="text-blue-500 font-bold text-sm underline decoration-2 underline-offset-4">
-            HOMEへ
+            HOMEへ戻る
           </Link>
         </div>
       </div>

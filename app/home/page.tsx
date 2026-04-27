@@ -1205,7 +1205,7 @@ export default function Home() {
         </div>
 
         {/* 携帯版 下部ナビゲーション兼操作パネル */}
-        <div className="bg-white border-t border-gray-100 p-6 pb-20 rounded-t-[48px] shadow-[0_-25px_50px_-12px_rgba(0,0,0,0.08)] flex-shrink-0">
+        <div className="bg-white border-t border-gray-100 p-4 sm:p-6 pb-20 rounded-t-[48px] shadow-[0_-25px_50px_-12px_rgba(0,0,0,0.08)] flex-shrink-0">
           {isAccountingMode && (
             <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
               <p className="text-[11px] font-black text-emerald-700 mb-2">会計モード</p>
@@ -1229,7 +1229,7 @@ export default function Home() {
                   {lastAccountingResult ? `${lastAccountingResult.summary} / 受取 ¥${lastAccountingResult.paid.toLocaleString("ja-JP")}` : "会計ボタンでおつり表示"}
                 </p>
               </div>
-              <div className="grid grid-cols-5 gap-1">
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-1">
                 {calculatorButtons.map((key) => (
                   <button
                     key={`calc-mobile-${key}`}
@@ -1260,7 +1260,7 @@ export default function Home() {
               </div>
             </div>
           )}
-          <div className={`grid gap-3 mb-8 ${counts.length <= 5 ? 'grid-cols-5' : counts.length <= 10 ? 'grid-cols-5' : 'grid-cols-6'}`}>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 mb-6">
             {counts.map((count: number, i: number) => {
               const selectedQuantity = cartQuantities[i] ?? 0;
               const remainingSelectable = Math.max(0, count - selectedQuantity);

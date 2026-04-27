@@ -306,9 +306,9 @@ export default function Admin() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
           {/* 新規作成フォーム */}
-          <div className="bg-white rounded-3xl p-8 shadow-lg">
+          <div className="bg-white rounded-3xl p-5 md:p-8 shadow-lg">
             <h2 className="text-2xl font-black text-gray-900 mb-6">
               新しいデータセットを作成
             </h2>
@@ -365,7 +365,7 @@ export default function Admin() {
                 <label className="block text-sm font-bold text-gray-700 mb-3">
                   各等級名
                 </label>
-                <div className={`grid gap-2 ${prizeCount <= 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                   {Array.from({ length: prizeCount }).map((_, i) => (
                     <div key={i}>
                       <p className="text-xs text-gray-500 mb-1 text-center">{i + 1}枠</p>
@@ -388,7 +388,7 @@ export default function Admin() {
                 <label className="block text-sm font-bold text-gray-700 mb-3">
                   初期カウント値
                 </label>
-                <div className={`grid gap-2 ${prizeCount <= 5 ? 'grid-cols-5' : prizeCount <= 10 ? 'grid-cols-5' : 'grid-cols-5'}`}>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                   {Array.from({ length: prizeCount }).map((_, i) => (
                     <div key={i}>
                       <p className="text-xs text-gray-500 mb-1 text-center">
@@ -428,7 +428,7 @@ export default function Admin() {
           </div>
 
           {/* データセット一覧 */}
-          <div className="bg-white rounded-3xl p-8 shadow-lg">
+          <div className="bg-white rounded-3xl p-5 md:p-8 shadow-lg">
             <h2 className="text-2xl font-black text-gray-900 mb-6">
               既存のデータセット
             </h2>
@@ -473,7 +473,7 @@ export default function Admin() {
                           </button>
                         </div>
                     </div>
-                    <div className={`grid gap-1 ${dataset.counts.length <= 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1">
                       {dataset.counts.map((count, i) => (
                         <div key={i} className="bg-gray-100 rounded p-2 text-center">
                           <p className="text-xs text-gray-500">{(Array.isArray(dataset.prizeLabels) && dataset.prizeLabels[i]) || `${i + 1}等`}</p>
@@ -492,7 +492,7 @@ export default function Admin() {
         {/* 編集モーダル */}
         {editingDataset && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-white rounded-3xl p-5 md:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
               <h2 className="text-2xl font-black text-gray-900 mb-6">
                 データセットを編集
               </h2>
@@ -534,7 +534,7 @@ export default function Admin() {
                   <label className="block text-sm font-bold text-gray-700 mb-3">
                     各等級名
                   </label>
-                  <div className={`grid gap-2 ${editPrizeCount <= 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                     {Array.from({ length: editPrizeCount }).map((_, i) => (
                       <div key={i}>
                         <p className="text-xs text-gray-500 mb-1 text-center">{i + 1}枠</p>

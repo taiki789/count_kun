@@ -36,6 +36,7 @@ export type AdminAccountRecord = {
   displayName: string;
   createdAt: string | null;
   lastSignInTime: string | null;
+  disabled: boolean;
   customClaims: Record<string, unknown>;
   admin: AdminGrantRecord | null;
 };
@@ -69,7 +70,7 @@ export async function getAdminAccounts() {
   return requestAdminJson<{ accounts: AdminAccountRecord[]; orphanedGrants: AdminGrantRecord[]; currentUser: AdminAccess }>('/api/admin/accounts');
 }
 
-export async function updateAdminAccount(action: 'grant' | 'revoke', email: string) {
+export async function updateAdminAccount(action: 'grant' | 'revoke' | 'ban' | 'unban', email: string) {
   return requestAdminJson<{ action: string; targetEmail: string; activeTempAdminCount: number; revokedEmails?: string[] }>('/api/admin/accounts', {
     method: 'POST',
     body: JSON.stringify({ action, email }),

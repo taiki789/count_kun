@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { AdminApiError, createOrUpdateAdminGrant, getCurrentAdminAccess, listAdminGrants, listFirebaseUsers, revokeAdminGrant } from '../_shared';
+import { AdminApiError, createOrUpdateAdminGrant, getCurrentAdminAccess, listAdminGrants, listFirebaseUsers, revokeAdminGrant, updateUserBanStatus } from '../_shared';
 
 export async function GET(request: Request) {
   try {
@@ -24,6 +24,7 @@ export async function GET(request: Request) {
         displayName: user.displayName ?? '',
         createdAt: user.metadata.creationTime ?? null,
         lastSignInTime: user.metadata.lastSignInTime ?? null,
+        disabled: user.disabled === true,
         customClaims: user.customClaims ?? {},
         admin: grant,
       };
@@ -66,6 +67,24 @@ export async function POST(request: Request) {
       const result = await revokeAdminGrant({
         requesterEmail: access.email,
         targetEmail,
+      });
+      return NextResponse.json(result);
+    }
+
+    if (action === 'ban') {
+      const result = await updateUserBanStatus({
+        requesterEmail: access.email,
+        targetEmail,
+        banned: true,
+      });
+      return NextResponse.json(result);
+    }
+
+    if (action === 'unban') {
+      const result = await updateUserBanStatus({
+        requesterEmail: access.email,
+        targetEmail,
+        banned: false,
       });
       return NextResponse.json(result);
     }

@@ -521,6 +521,72 @@ export async function revokeAdminGrant(options: {
   };
 }
 
+export async function updateUserBanStatus(options: {
+  requesterEmail: string;
+  targetEmail: string;
+  banned: boolean;
+}) {
+  const db = getAdminDB();
+  const requesterEmail = normalizeEmail(options.requesterEmail);
+  const targetEmail = normalizeEmail(options.targetEmail);
+
+  if (!requesterEmail || !targetEmail) {
+    throw new AdminApiError('Email is required', 400);
+  }
+
+  await pruneAdminGrants(db);
+
+  const requesterGrant = await getGrantRecord(db, requesterEmail);
+  if (!requesterGrant || (!isGrantActive(requesterGrant) && !requesterGrant.isPermanent)) {
+    throw new AdminApiError('You are not allowed to update ban status', 403);
+  }
+
+  if (targetEmail === SUPER_ADMIN_EMAIL) {
+    throw new AdminApiError('Permanent admin cannot be banned', 403);
+  }
+
+  if (targetEmail === requesterEmail && options.banned) {
+    throw new AdminApiError('You cannot ban yourself', 409);
+  }
+
+  const targetUser = await admin.auth().getUserByEmail(targetEmail);
+  if (targetUser.disabled === options.banned) {
+    return {
+      targetEmail,
+      action: options.banned ? 'already-banned' : 'already-unbanned',
+      activeTempAdminCount: await countActiveTemporaryAdmins(db),
+    };
+  }
+
+  await admin.auth().updateUser(targetUser.uid, { disabled: options.banned });
+
+  if (options.banned) {
+    const now = Date.now();
+    const targetGrant = await getGrantRecord(db, targetEmail);
+    if (targetGrant && !targetGrant.isPermanent) {
+      await db.collection(ADMIN_GRANTS_COLLECTION).doc(targetEmail).set(
+        {
+          active: false,
+          revokedAt: now,
+          revokedReason: 'banned',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      await setAdminClaims(targetEmail, {
+        admin: false,
+        adminEmail: targetEmail,
+      });
+    }
+  }
+
+  return {
+    targetEmail,
+    action: options.banned ? 'banned' : 'unbanned',
+    activeTempAdminCount: await countActiveTemporaryAdmins(db),
+  };
+}
+
 export async function listFirebaseUsers() {
   const users: admin.auth.UserRecord[] = [];
   let pageToken: string | undefined = undefined;

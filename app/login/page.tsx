@@ -99,9 +99,14 @@ export default function LoginPage() {
                 </Link>
               </div>
             ) : (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-xs font-black text-amber-700">一般アカウント</p>
-                <p className="mt-1 text-xs font-semibold text-amber-800">このアカウントでは管理メニューは利用できません</p>
+              <div className="space-y-3">
+                <Link href="/select-dataset" className="block w-full rounded-2xl bg-indigo-600 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700">
+                  データセットを選ぶ
+                </Link>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-xs font-black text-amber-700">一般アカウント</p>
+                  <p className="mt-1 text-xs font-semibold text-amber-800">このアカウントでは管理メニューは利用できません</p>
+                </div>
               </div>
             )}
 

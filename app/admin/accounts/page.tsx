@@ -35,7 +35,7 @@ export default function AdminAccountsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const activeAdmins = useMemo(() => accounts.filter((account) => account.admin?.active), [accounts]);
+  const activeAdmins = useMemo(() => accounts.filter((account) => account.admin?.active && !account.disabled), [accounts]);
 
   const loadAccounts = async () => {
     const data = await getAdminAccounts();
@@ -143,6 +143,54 @@ export default function AdminAccountsPage() {
     }
   };
 
+  const handleBan = async (targetEmail: string) => {
+    if (!confirm(`${targetEmail} をBANしますか？`)) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const result = await updateAdminAccount("ban", targetEmail);
+      if (!result) {
+        throw new Error("BANに失敗しました");
+      }
+      setMessage("アカウントをBANしました");
+      await loadAccounts();
+    } catch (banError) {
+      const messageText = banError instanceof Error ? banError.message : "BANに失敗しました";
+      setError(messageText);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUnban = async (targetEmail: string) => {
+    if (!confirm(`${targetEmail} のBANを解除しますか？`)) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const result = await updateAdminAccount("unban", targetEmail);
+      if (!result) {
+        throw new Error("BAN解除に失敗しました");
+      }
+      setMessage("BANを解除しました");
+      await loadAccounts();
+    } catch (unbanError) {
+      const messageText = unbanError instanceof Error ? unbanError.message : "BAN解除に失敗しました";
+      setError(messageText);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
@@ -231,13 +279,14 @@ export default function AdminAccountsPage() {
                   <th className="border-b border-gray-100 px-4 py-3">付与元</th>
                   <th className="border-b border-gray-100 px-4 py-3">期限</th>
                   <th className="border-b border-gray-100 px-4 py-3">最終ログイン</th>
+                  <th className="border-b border-gray-100 px-4 py-3">利用状態</th>
                   <th className="border-b border-gray-100 px-4 py-3">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {accounts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
+                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
                       アカウントが見つかりません
                     </td>
                   </tr>
@@ -268,18 +317,43 @@ export default function AdminAccountsPage() {
                           {formatDateTime(account.lastSignInTime)}
                         </td>
                         <td className="border-b border-gray-100 px-4 py-4">
-                          {grant && isActiveAdmin && !isPermanent ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleRevoke(account.email)}
-                              disabled={saving}
-                              className="rounded-full border border-red-200 px-4 py-2 text-xs font-black text-red-600 disabled:opacity-60"
-                            >
-                              失効
-                            </button>
-                          ) : (
-                            <span className="text-xs text-gray-400">-</span>
-                          )}
+                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${account.disabled ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
+                            {account.disabled ? "BAN中" : "有効"}
+                          </span>
+                        </td>
+                        <td className="border-b border-gray-100 px-4 py-4">
+                          <div className="flex items-center gap-2">
+                            {grant && isActiveAdmin && !isPermanent ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleRevoke(account.email)}
+                                disabled={saving}
+                                className="rounded-full border border-red-200 px-4 py-2 text-xs font-black text-red-600 disabled:opacity-60"
+                              >
+                                失効
+                              </button>
+                            ) : null}
+                            {account.disabled ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleUnban(account.email)}
+                                disabled={saving}
+                                className="rounded-full border border-emerald-200 px-4 py-2 text-xs font-black text-emerald-700 disabled:opacity-60"
+                              >
+                                BAN解除
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void handleBan(account.email)}
+                                disabled={saving || account.email.trim().toLowerCase() === accessEmail?.trim().toLowerCase()}
+                                className="rounded-full border border-amber-200 px-4 py-2 text-xs font-black text-amber-700 disabled:opacity-60"
+                              >
+                                BAN
+                              </button>
+                            )}
+                            {!grant && !isActiveAdmin && !isPermanent && !account.disabled ? null : null}
+                          </div>
                         </td>
                       </tr>
                     );

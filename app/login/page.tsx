@@ -61,47 +61,65 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-8">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow">
-        <h1 className="mb-4 text-2xl font-semibold">
-          {user ? "ようこそ" : isRegister ? "アカウント作成" : "ログイン"}
-        </h1>
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-zinc-50 to-white px-4 py-8 md:px-8 md:py-12">
+      <div className="mx-auto w-full max-w-xl rounded-3xl border border-white/80 bg-white p-5 shadow-xl md:p-8">
+        <div className="mb-5 rounded-2xl bg-slate-900 px-4 py-4 text-white md:px-5">
+          <p className="text-[11px] font-black tracking-[0.2em]">COUNT KUN</p>
+          <h1 className="mt-2 text-2xl font-black md:text-3xl">
+            {user ? "メニュー" : isRegister ? "アカウント作成" : "ログイン"}
+          </h1>
+          <p className="mt-1 text-xs text-slate-200 md:text-sm">
+            {user
+              ? "ログイン状態を確認して操作メニューを選択してください"
+              : "まずはログインして管理メニューへ進みます"}
+          </p>
+        </div>
 
         {user ? (
-          <div>
-            <p className="mb-4 text-gray-600">{user.email}</p>
-            <div className="flex flex-col gap-2">
-              {isAdmin ? (
-                <>
-                  <Link href="/select-dataset" className="w-full rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-white text-center font-black transition">
-                    データセット
-                  </Link>
-                  <Link href="/admin" className="w-full rounded bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 text-center font-black transition">
-                    🔐 景品管理
-                  </Link>
-                  <Link href="/admin/accounts" className="w-full rounded bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-center font-black transition">
-                    👥 アカウント管理
-                  </Link>
-                </>
-              ) : (
-                <p className="text-xs text-gray-500">※ このアカウントでは管理メニューは利用できません</p>
-              )}
-              <button
-                className="w-full rounded border border-gray-300 hover:bg-gray-50 px-4 py-2 transition"
-                onClick={handleSignOut}
-              >
-                サインアウト
-              </button>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+              <p className="text-[11px] font-black tracking-[0.15em] text-gray-500">SIGNED IN</p>
+              <p className="mt-1 break-all text-sm font-bold text-gray-900">{user.email}</p>
             </div>
+
+            {isAdmin ? (
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+                  <p className="text-xs font-black text-indigo-700">管理者メニュー</p>
+                  <p className="mt-1 text-[11px] font-semibold text-indigo-700">スマホでも使いやすいように主要操作を上から並べています</p>
+                </div>
+                <Link href="/select-dataset" className="block w-full rounded-2xl bg-indigo-600 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700">
+                  データセットを選ぶ
+                </Link>
+                <Link href="/admin" className="block w-full rounded-2xl bg-slate-800 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-slate-200 transition hover:bg-slate-900">
+                  景品管理を開く
+                </Link>
+                <Link href="/admin/accounts" className="block w-full rounded-2xl bg-emerald-600 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700">
+                  アカウント管理を開く
+                </Link>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-black text-amber-700">一般アカウント</p>
+                <p className="mt-1 text-xs font-semibold text-amber-800">このアカウントでは管理メニューは利用できません</p>
+              </div>
+            )}
+
+            <button
+              className="w-full rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm font-black text-gray-700 transition hover:bg-gray-50"
+              onClick={handleSignOut}
+            >
+              サインアウト
+            </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-            <label htmlFor="email-input" className="flex flex-col text-sm">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <label htmlFor="email-input" className="block text-sm font-bold text-gray-700">
               Email
               <input
                 id="email-input"
                 name="email"
-                className="mt-1 rounded border px-2 py-1"
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-sm text-gray-900 outline-none focus:border-indigo-500"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -109,12 +127,12 @@ export default function LoginPage() {
               />
             </label>
 
-            <label htmlFor="password-input" className="flex flex-col text-sm">
+            <label htmlFor="password-input" className="block text-sm font-bold text-gray-700">
               Password
               <input
                 id="password-input"
                 name="password"
-                className="mt-1 rounded border px-2 py-1"
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-sm text-gray-900 outline-none focus:border-indigo-500"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -123,26 +141,24 @@ export default function LoginPage() {
             </label>
 
             {error && (
-              <div className="text-sm text-red-600">{error}</div>
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div>
             )}
 
-            <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={loading}
-                className="rounded bg-foreground px-4 py-2 text-background disabled:opacity-60"
-              >
-                {isRegister ? "アカウント作成" : "ログイン"}
-              </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-2 w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white transition hover:bg-black disabled:opacity-60"
+            >
+              {loading ? "処理中..." : isRegister ? "アカウント作成" : "ログイン"}
+            </button>
 
-              <button
-                type="button"
-                className="text-sm underline"
-                onClick={() => setIsRegister((s) => !s)}
-              >
-                {isRegister ? "既にアカウントを持っている" : "アカウント作成"}
-              </button>
-            </div>
+            <button
+              type="button"
+              className="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 transition hover:bg-gray-50"
+              onClick={() => setIsRegister((s) => !s)}
+            >
+              {isRegister ? "既にアカウントを持っている" : "アカウント作成へ切り替え"}
+            </button>
           </form>
         )}
       </div>

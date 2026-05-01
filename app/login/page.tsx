@@ -91,6 +91,9 @@ export default function LoginPage() {
                 <Link href="/select-dataset" className="block w-full rounded-2xl bg-indigo-600 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700">
                   データセットを選ぶ
                 </Link>
+                <Link href="/select-dataset?mode=graph" className="block w-full rounded-2xl bg-amber-500 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-amber-200 transition hover:bg-amber-600">
+                  景品遷移グラフをダウンロード
+                </Link>
                 <Link href="/admin" className="block w-full rounded-2xl bg-slate-800 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-slate-200 transition hover:bg-slate-900">
                   景品管理を開く
                 </Link>
@@ -102,6 +105,9 @@ export default function LoginPage() {
               <div className="space-y-3">
                 <Link href="/select-dataset" className="block w-full rounded-2xl bg-indigo-600 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700">
                   データセットを選ぶ
+                </Link>
+                <Link href="/select-dataset?mode=graph" className="block w-full rounded-2xl bg-amber-500 px-4 py-4 text-center text-sm font-black text-white shadow-lg shadow-amber-200 transition hover:bg-amber-600">
+                  景品遷移グラフをダウンロード
                 </Link>
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <p className="text-xs font-black text-amber-700">一般アカウント</p>
